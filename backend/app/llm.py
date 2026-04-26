@@ -210,10 +210,11 @@ def call_compiler(
     }
     if provider == "anthropic":
         # Anthropic SDK requires max_tokens. Architect/Compiler payloads
-        # routinely exceed 4k tokens (full Contract JSON with payload
-        # schemas + assumptions), so we set a generous ceiling and rely
-        # on instructor's retry to recover any partial output.
-        common_kwargs["max_tokens"] = 8192
+        # routinely exceed 8k tokens once the contract has been refined a
+        # couple of times (decisions list, expanded assumptions, payload
+        # schemas), so we set a generous ceiling and rely on instructor's
+        # retry to recover any partial output.
+        common_kwargs["max_tokens"] = 16384
 
     result: CompilerOutput = client.chat.completions.create(**common_kwargs)
     duration_ms = int((time.perf_counter() - start) * 1000)
@@ -249,7 +250,7 @@ def call_structured(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 0.0,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     max_retries: int = 2,
 ) -> T:
     """Generic structured-output call.

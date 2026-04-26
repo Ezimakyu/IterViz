@@ -178,7 +178,11 @@ export const useContractStore = create<ContractState>((set, get) => ({
     set((s) => ({
       previousContract: s.contract,
       contract: refined.contract,
+      // Clear all verification artifacts: they were computed against
+      // the *previous* contract and are stale once we refine.
+      violations: [],
       questions: [],
+      uvdcScore: 0,
       iteration: s.iteration + 1,
       isLoading: false,
     }));

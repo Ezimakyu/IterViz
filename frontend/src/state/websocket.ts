@@ -90,7 +90,15 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   connect: (sessionId: string) => {
     const existing = get().socket;
     if (existing && get().sessionId === sessionId) return;
-    if (existing) existing.close();
+    if (existing) {
+      // Detach the close handler before closing so the old socket's
+      // onclose can't schedule a reconnect to the previous session
+      // (which would race with the new connection and silently revert
+      // the store back to the old sessionId once it opens).
+      existing.onclose = null;
+      existing.close();
+    }
+    set({ socket: null, sessionId, reconnectAttempts: 0 });
 
     const url = `${WS_BASE}/sessions/${sessionId}/stream`;
 

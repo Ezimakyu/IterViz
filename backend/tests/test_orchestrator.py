@@ -222,3 +222,27 @@ def test_internal_run_marks_assignments_completed(
             assert str(resolved).startswith(str(gen_root)), resolved
 
     orchestrator.set_generated_dir(None)
+
+
+def test_get_generated_files_dir_rejects_traversal(tmp_path) -> None:
+    """A crafted session_id like ``..`` must not escape the gen root."""
+    orchestrator.set_generated_dir(tmp_path / "gen")
+    (tmp_path / "gen").mkdir()
+    try:
+        for bad in ["..", "../sibling", "../../etc", "/etc"]:
+            with pytest.raises(ValueError):
+                orchestrator.get_generated_files_dir(bad)
+    finally:
+        orchestrator.set_generated_dir(None)
+
+
+def test_create_assignments_is_idempotent(session: str) -> None:
+    """Repeated /implement calls must not duplicate assignments."""
+    orchestrator.freeze_contract(session)
+    first = orchestrator.create_assignments(session)
+    second = orchestrator.create_assignments(session)
+
+    assert len(first) == len(second)
+    assert {a.id for a in first} == {a.id for a in second}
+    stored = assignments_svc.get_assignments_for_session(session)
+    assert len(stored) == len(first)

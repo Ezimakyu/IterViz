@@ -218,6 +218,18 @@ def create_assignments(session_id: str) -> list[Assignment]:
             "Contract must be frozen (verified) before creating assignments"
         )
 
+    # Idempotency: if assignments already exist for this session, return
+    # them instead of fanning out a duplicate set. Each duplicate would
+    # be unreachable via _find_by_node_locked() and would permanently
+    # poll PENDING in get_available_assignments.
+    existing = assignments_svc.get_assignments_for_session(session_id)
+    if existing:
+        log.info(
+            "orchestrator.assignments_reused",
+            extra={"session_id": session_id, "count": len(existing)},
+        )
+        return existing
+
     assignments: list[Assignment] = []
     for node in contract.nodes:
         incoming, outgoing = get_neighbor_interfaces(node, contract)
@@ -582,11 +594,21 @@ async def run_integration_pass(session_id: str) -> list[IntegrationMismatch]:
 
 
 def get_generated_files_dir(session_id: str) -> Path:
-    """Return the directory containing generated files for a session."""
-    output_dir = get_generated_dir() / session_id
-    if not output_dir.exists():
+    """Return the directory containing generated files for a session.
+
+    Resolves the candidate path and verifies it stays under the generated
+    root, so a crafted ``session_id`` like ``..`` cannot escape the
+    output directory and read arbitrary backend files.
+    """
+    generated_root = get_generated_dir().resolve()
+    candidate = (generated_root / session_id).resolve()
+    if candidate != generated_root and generated_root not in candidate.parents:
+        raise ValueError(f"Invalid session id: {session_id}")
+    if candidate == generated_root:
+        raise ValueError(f"Invalid session id: {session_id}")
+    if not candidate.exists():
         raise ValueError(f"No generated files for session {session_id}")
-    return output_dir
+    return candidate
 
 
 __all__ = [

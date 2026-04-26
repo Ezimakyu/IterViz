@@ -1,8 +1,12 @@
 import { create } from "zustand";
 import type {
+  Agent,
   CompilerResponse,
   Contract,
   Decision,
+  ImplementMode,
+  IntegrationMismatch,
+  NodeStatus,
   Violation,
 } from "../types/contract";
 import {
@@ -38,6 +42,17 @@ interface ContractState {
   isLoading: boolean;
   error: string | null;
 
+  // ---- M5: Phase 2 orchestration ----
+  isFrozen: boolean;
+  isImplementing: boolean;
+  implementationMode: ImplementMode | null;
+  implementationComplete: boolean;
+  implementationSuccess: boolean;
+  connectedAgents: Map<string, Agent>;
+  nodeAgents: Map<string, { agentId: string; agentName: string }>;
+  nodeProgress: Map<string, number>;
+  integrationMismatches: IntegrationMismatch[];
+
   // ---- actions ----
   setSession: (sessionId: string, contract: Contract) => void;
   setVerificationResult: (result: CompilerResponse) => void;
@@ -51,10 +66,26 @@ interface ContractState {
   clearSelection: () => void;
   resetSession: () => void;
 
+  // ---- M5 actions ----
+  setFrozen: (frozen: boolean) => void;
+  setImplementing: (implementing: boolean, mode?: ImplementMode) => void;
+  updateNodeStatus: (
+    nodeId: string,
+    status: NodeStatus,
+    agent?: { id: string; name: string } | null,
+  ) => void;
+  setNodeProgress: (nodeId: string, progress: number) => void;
+  setAgentInfo: (agentId: string, agent: Agent) => void;
+  addMismatch: (mismatch: IntegrationMismatch) => void;
+  setIntegrationMismatches: (mismatches: IntegrationMismatch[]) => void;
+  setImplementationComplete: (success: boolean) => void;
+
   // ---- thunks ----
   startSession: (prompt: string) => Promise<void>;
   verify: () => Promise<void>;
   submitAnswersAndRefine: (decisions: Decision[]) => Promise<void>;
+  freeze: () => Promise<void>;
+  implement: (mode: ImplementMode) => Promise<void>;
 }
 
 const initialSelection = {
@@ -73,6 +104,15 @@ export const useContractStore = create<ContractState>((set, get) => ({
   ...initialSelection,
   isLoading: false,
   error: null,
+  isFrozen: false,
+  isImplementing: false,
+  implementationMode: null,
+  implementationComplete: false,
+  implementationSuccess: false,
+  connectedAgents: new Map(),
+  nodeAgents: new Map(),
+  nodeProgress: new Map(),
+  integrationMismatches: [],
 
   setSession: (sessionId, contract) =>
     set({
@@ -84,6 +124,17 @@ export const useContractStore = create<ContractState>((set, get) => ({
       uvdcScore: 0,
       iteration: 0,
       error: null,
+      isFrozen: contract.meta?.status === "verified" ||
+        contract.meta?.status === "implementing" ||
+        contract.meta?.status === "complete",
+      isImplementing: false,
+      implementationMode: null,
+      implementationComplete: false,
+      implementationSuccess: false,
+      connectedAgents: new Map(),
+      nodeAgents: new Map(),
+      nodeProgress: new Map(),
+      integrationMismatches: [],
       ...initialSelection,
     }),
 
@@ -131,6 +182,75 @@ export const useContractStore = create<ContractState>((set, get) => ({
       ...initialSelection,
       isLoading: false,
       error: null,
+      isFrozen: false,
+      isImplementing: false,
+      implementationMode: null,
+      implementationComplete: false,
+      implementationSuccess: false,
+      connectedAgents: new Map(),
+      nodeAgents: new Map(),
+      nodeProgress: new Map(),
+      integrationMismatches: [],
+    }),
+
+  // ---------------------------------------------------------------------
+  // M5 actions
+  // ---------------------------------------------------------------------
+
+  setFrozen: (frozen) => set({ isFrozen: frozen }),
+
+  setImplementing: (implementing, mode) =>
+    set({
+      isImplementing: implementing,
+      implementationMode: mode ?? null,
+      implementationComplete: false,
+    }),
+
+  updateNodeStatus: (nodeId, status, agent) =>
+    set((s) => {
+      if (!s.contract) return {};
+      const nodes = s.contract.nodes.map((n) =>
+        n.id === nodeId ? { ...n, status } : n,
+      );
+      const nodeAgents = new Map(s.nodeAgents);
+      if (agent) {
+        nodeAgents.set(nodeId, { agentId: agent.id, agentName: agent.name });
+      } else if (status === "drafted") {
+        nodeAgents.delete(nodeId);
+      }
+      return {
+        contract: { ...s.contract, nodes },
+        nodeAgents,
+      };
+    }),
+
+  setNodeProgress: (nodeId, progress) =>
+    set((s) => {
+      const np = new Map(s.nodeProgress);
+      np.set(nodeId, progress);
+      return { nodeProgress: np };
+    }),
+
+  setAgentInfo: (agentId, agent) =>
+    set((s) => {
+      const next = new Map(s.connectedAgents);
+      next.set(agentId, agent);
+      return { connectedAgents: next };
+    }),
+
+  addMismatch: (mismatch) =>
+    set((s) => ({
+      integrationMismatches: [...s.integrationMismatches, mismatch],
+    })),
+
+  setIntegrationMismatches: (mismatches) =>
+    set({ integrationMismatches: mismatches }),
+
+  setImplementationComplete: (success) =>
+    set({
+      implementationComplete: true,
+      implementationSuccess: success,
+      isImplementing: false,
     }),
 
   // ---------------------------------------------------------------------
@@ -186,5 +306,44 @@ export const useContractStore = create<ContractState>((set, get) => ({
       iteration: s.iteration + 1,
       isLoading: false,
     }));
+  },
+
+  // ---------------------------------------------------------------------
+  // M5 thunks
+  // ---------------------------------------------------------------------
+
+  freeze: async () => {
+    const sid = get().sessionId;
+    if (!sid) return;
+    set({ isLoading: true, error: null });
+    const result = await API.freezeContract(sid);
+    if (isApiError(result)) {
+      set({ isLoading: false, error: result.detail });
+      return;
+    }
+    set((s) => ({
+      contract: result.contract,
+      previousContract: s.contract,
+      isFrozen: true,
+      isLoading: false,
+    }));
+  },
+
+  implement: async (mode) => {
+    const sid = get().sessionId;
+    if (!sid) return;
+    set({ isLoading: true, error: null });
+    const result = await API.startImplementation(sid, mode);
+    if (isApiError(result)) {
+      set({ isLoading: false, error: result.detail });
+      return;
+    }
+    set({
+      isImplementing: true,
+      implementationMode: mode,
+      implementationComplete: false,
+      implementationSuccess: false,
+      isLoading: false,
+    });
   },
 }));

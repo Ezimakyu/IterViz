@@ -43,6 +43,16 @@ function GraphInner({ contract }: GraphProps) {
     clearSelection,
   } = useContractStore();
   const previousContract = useContractStore((s) => s.previousContract);
+  const provenanceView = useContractStore((s) => s.provenanceView);
+  const toggleProvenanceView = useContractStore(
+    (s) => s.toggleProvenanceView,
+  );
+
+  const userEditedCount = useMemo(
+    () =>
+      contract.nodes.filter((n) => n.decided_by === "user").length,
+    [contract],
+  );
 
   const hierarchy = useMemo(() => buildHierarchy(contract), [contract]);
 
@@ -139,6 +149,35 @@ function GraphInner({ contract }: GraphProps) {
           {diff.newNodeIds.size} new · {diff.changedNodeIds.size} changed
         </div>
       )}
+
+      {/* M4: provenance view toggle. Highlights only user-edited nodes. */}
+      <div className="absolute left-3 top-3 flex flex-col items-start gap-2">
+        <button
+          type="button"
+          onClick={toggleProvenanceView}
+          data-testid="provenance-view-toggle"
+          aria-pressed={provenanceView}
+          className={`rounded border px-2 py-1 text-[11px] font-medium uppercase tracking-wide transition ${
+            provenanceView
+              ? "border-blue-400 bg-blue-500/20 text-blue-200"
+              : "border-slate-600 bg-slate-800/70 text-slate-300 hover:border-blue-400 hover:text-blue-200"
+          }`}
+        >
+          Provenance view {provenanceView ? "on" : "off"}
+        </button>
+        {provenanceView && (
+          <div className="pointer-events-none rounded border border-slate-600/60 bg-slate-900/80 px-2 py-1 text-[10px] leading-tight text-slate-200 shadow">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
+              <span>User-edited ({userEditedCount})</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-slate-400 opacity-60" />
+              <span>Other</span>
+            </div>
+          </div>
+        )}
+      </div>
 
       {selectedNode && (
         <NodeDetailsPopup

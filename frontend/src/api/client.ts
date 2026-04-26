@@ -8,9 +8,11 @@
 
 import type {
   Agent,
+  Assumption,
   CompilerResponse,
   Contract,
   ContractDiff,
+  ContractNode,
   Decision,
   FreezeResponse,
   ImplementMode,
@@ -114,6 +116,36 @@ export function refineContract(sessionId: string, answers: Decision[] = []) {
 }
 
 // ---------------------------------------------------------------------------
+// M4: Node update
+// ---------------------------------------------------------------------------
+
+export interface NodeUpdateRequest {
+  description?: string;
+  responsibilities?: string[];
+  assumptions?: Assumption[];
+}
+
+export interface NodeUpdateResponse {
+  node: ContractNode;
+  fields_updated: string[];
+  provenance_set: Record<string, string>;
+}
+
+export function updateNode(
+  sessionId: string,
+  nodeId: string,
+  updates: NodeUpdateRequest,
+) {
+  return request<NodeUpdateResponse>(
+    `/sessions/${sessionId}/nodes/${nodeId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // M5: Phase 2 endpoints
 // ---------------------------------------------------------------------------
 
@@ -154,6 +186,7 @@ export const API = {
   verifyContract,
   submitAnswers,
   refineContract,
+  updateNode,
   freezeContract,
   startImplementation,
   registerAgent,

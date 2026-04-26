@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   Agent,
+  Assumption,
   CompilerResponse,
   Contract,
   Decision,
@@ -12,6 +13,7 @@ import type {
 import {
   API,
   isApiError,
+  type NodeUpdateRequest,
 } from "../api/client";
 
 /**
@@ -42,6 +44,10 @@ interface ContractState {
   isLoading: boolean;
   error: string | null;
 
+  // ---- M4: per-field user-edit tracking (nodeId -> fieldNames[]) ----
+  userEditedFields: Record<string, string[]>;
+  provenanceView: boolean;
+
   // ---- M5: Phase 2 orchestration ----
   isFrozen: boolean;
   isImplementing: boolean;
@@ -65,6 +71,9 @@ interface ContractState {
   toggleSelectedEdge: (id: string) => void;
   clearSelection: () => void;
   resetSession: () => void;
+  clearUserEdits: () => void;
+  toggleProvenanceView: () => void;
+  setProvenanceView: (on: boolean) => void;
 
   // ---- M5 actions ----
   setFrozen: (frozen: boolean) => void;
@@ -86,6 +95,11 @@ interface ContractState {
   submitAnswersAndRefine: (decisions: Decision[]) => Promise<void>;
   freeze: () => Promise<void>;
   implement: (mode: ImplementMode) => Promise<void>;
+  updateNodeField: (
+    nodeId: string,
+    field: "description" | "responsibilities" | "assumptions",
+    value: string | string[] | Assumption[],
+  ) => Promise<void>;
 }
 
 const initialSelection = {
@@ -104,6 +118,8 @@ export const useContractStore = create<ContractState>((set, get) => ({
   ...initialSelection,
   isLoading: false,
   error: null,
+  userEditedFields: {},
+  provenanceView: false,
   isFrozen: false,
   isImplementing: false,
   implementationMode: null,
@@ -124,6 +140,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
       uvdcScore: 0,
       iteration: 0,
       error: null,
+      userEditedFields: {},
       isFrozen: contract.meta?.status === "verified" ||
         contract.meta?.status === "implementing" ||
         contract.meta?.status === "complete",
@@ -182,6 +199,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
       ...initialSelection,
       isLoading: false,
       error: null,
+      userEditedFields: {},
       isFrozen: false,
       isImplementing: false,
       implementationMode: null,
@@ -253,6 +271,13 @@ export const useContractStore = create<ContractState>((set, get) => ({
       isImplementing: false,
     }),
 
+  clearUserEdits: () => set({ userEditedFields: {} }),
+
+  toggleProvenanceView: () =>
+    set((s) => ({ provenanceView: !s.provenanceView })),
+
+  setProvenanceView: (provenanceView) => set({ provenanceView }),
+
   // ---------------------------------------------------------------------
   // Thunks
   // ---------------------------------------------------------------------
@@ -279,6 +304,50 @@ export const useContractStore = create<ContractState>((set, get) => ({
     }
     get().setVerificationResult(result);
     set({ isLoading: false });
+  },
+
+  updateNodeField: async (
+    nodeId: string,
+    field: "description" | "responsibilities" | "assumptions",
+    value: string | string[] | Assumption[],
+  ) => {
+    const sid = get().sessionId;
+    const contract = get().contract;
+    if (!sid || !contract) return;
+
+    const updates: NodeUpdateRequest = {};
+    if (field === "description") updates.description = value as string;
+    if (field === "responsibilities") {
+      updates.responsibilities = value as string[];
+    }
+    if (field === "assumptions") updates.assumptions = value as Assumption[];
+
+    set({ isLoading: true, error: null });
+    const result = await API.updateNode(sid, nodeId, updates);
+    if (isApiError(result)) {
+      set({ isLoading: false, error: result.detail });
+      return;
+    }
+
+    // Patch the node in-place. Treat the previous contract as the diff
+    // baseline so the graph highlights this single edit.
+    const updatedNodes = contract.nodes.map((n) =>
+      n.id === nodeId ? { ...n, ...result.node } : n,
+    );
+    const previousFields = get().userEditedFields[nodeId] ?? [];
+    const mergedFields = Array.from(
+      new Set([...previousFields, ...result.fields_updated]),
+    );
+
+    set({
+      previousContract: contract,
+      contract: { ...contract, nodes: updatedNodes },
+      isLoading: false,
+      userEditedFields: {
+        ...get().userEditedFields,
+        [nodeId]: mergedFields,
+      },
+    });
   },
 
   submitAnswersAndRefine: async (decisions: Decision[]) => {

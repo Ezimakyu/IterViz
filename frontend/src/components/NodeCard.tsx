@@ -54,6 +54,8 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const selectedNodeId = useContractStore((s) => s.selectedNodeId);
   const previousContract = useContractStore((s) => s.previousContract);
   const nodeAgents = useContractStore((s) => s.nodeAgents);
+  const userEditedFields = useContractStore((s) => s.userEditedFields);
+  const provenanceView = useContractStore((s) => s.provenanceView);
   const isSpotlight = selectedNodeId === id;
   const size = TIER_SIZE[tier];
   const statusRing = STATUS_RING[node.status] ?? "";
@@ -69,6 +71,12 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
       prev.decided_by !== node.decided_by ||
       prev.name !== node.name);
 
+  // M4: provenance highlights. A node is treated as "user-edited" when
+  // either the live store recorded an edit this session, or the backend
+  // told us the node's provenance is now ``user``.
+  const isUserEdited =
+    (userEditedFields[id]?.length ?? 0) > 0 || node.decided_by === "user";
+
   return (
     <div
       className={[
@@ -81,10 +89,14 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
           : "border-slate-400",
         isNew || isChanged ? "!ring-yellow-400/80 ring-[3px]" : "",
         statusRing,
+        isUserEdited ? "!ring-blue-500/80 ring-[3px] shadow-blue-500/30" : "",
+        provenanceView && !isUserEdited ? "opacity-60" : "",
       ].join(" ")}
       style={{ width: size.width, height: size.height }}
       data-testid={`node-card-${node.id}`}
       data-tier={tier}
+      data-decided-by={node.decided_by ?? "agent"}
+      data-user-edited={isUserEdited ? "true" : "false"}
       title={node.description ?? node.name}
     >
       {/* Invisible centered handles — floating edges ignore side. */}
@@ -110,6 +122,14 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
           title={`Claimed by ${agentInfo.agentName}`}
         >
           {agentInfo.agentName}
+        </span>
+      )}
+      {isUserEdited && !isNew && (
+        <span
+          className="absolute -top-2 -right-1 rounded bg-blue-500 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-sm"
+          data-testid={`node-user-badge-${node.id}`}
+        >
+          USER
         </span>
       )}
       <div className="flex items-center justify-center">

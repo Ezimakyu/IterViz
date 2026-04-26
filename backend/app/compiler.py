@@ -789,6 +789,11 @@ def verify_contract(
             },
         )
 
+    # LLM-provided violations also need to flow through the "already answered"
+    # filter so a question the user has already addressed cannot resurface
+    # just because the LLM re-raised it.
+    extra_violations = [v for v in extra_violations if not _already_answered(v)]
+
     all_violations = (
         invariant_violations
         + failure_violations

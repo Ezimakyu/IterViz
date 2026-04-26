@@ -25,7 +25,14 @@ interface ContractState {
   contract: Contract | null;
   loading: boolean;
   error: string | null;
+  selectedNodeId: string | null;
+  selectedEdgeId: string | null;
   selectContract: (id: string) => Promise<void>;
+  setSelectedNode: (id: string | null) => void;
+  setSelectedEdge: (id: string | null) => void;
+  toggleSelectedEdge: (id: string) => void;
+  toggleSelectedNode: (id: string) => void;
+  clearSelection: () => void;
 }
 
 export const useContractStore = create<ContractState>((set, get) => ({
@@ -33,13 +40,21 @@ export const useContractStore = create<ContractState>((set, get) => ({
   contract: null,
   loading: false,
   error: null,
+  selectedNodeId: null,
+  selectedEdgeId: null,
   selectContract: async (id: string) => {
     const entry = CONTRACT_CATALOG.find((e) => e.id === id);
     if (!entry) {
       set({ error: `Unknown contract id: ${id}` });
       return;
     }
-    set({ selectedId: id, loading: true, error: null });
+    set({
+      selectedId: id,
+      loading: true,
+      error: null,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+    });
     try {
       const res = await fetch(entry.path);
       if (!res.ok) {
@@ -57,4 +72,17 @@ export const useContractStore = create<ContractState>((set, get) => ({
       });
     }
   },
+  setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
+  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
+  toggleSelectedNode: (id) =>
+    set((s) => ({
+      selectedNodeId: s.selectedNodeId === id ? null : id,
+      selectedEdgeId: null,
+    })),
+  toggleSelectedEdge: (id) =>
+    set((s) => ({
+      selectedEdgeId: s.selectedEdgeId === id ? null : id,
+      selectedNodeId: null,
+    })),
+  clearSelection: () => set({ selectedNodeId: null, selectedEdgeId: null }),
 }));

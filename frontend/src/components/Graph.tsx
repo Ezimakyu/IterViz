@@ -4,74 +4,139 @@ import ReactFlow, {
   BackgroundVariant,
   Controls,
   MiniMap,
+  ReactFlowProvider,
   type Edge,
+  type EdgeMouseHandler,
   type EdgeTypes,
-  type Node,
+  type NodeMouseHandler,
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import type { Contract } from "../types/contract";
-import { layoutGraph } from "../utils/layout";
 import { NodeCard } from "./NodeCard";
 import { EdgeLabel, type EdgeData } from "./EdgeLabel";
+import { NodeDetailsPopup } from "./NodeDetailsPopup";
+import { EdgeDetailsPopup } from "./EdgeDetailsPopup";
+import { useForceLayout } from "../hooks/useForceLayout";
+import { useContractStore } from "../state/contract";
 
-const nodeTypes: NodeTypes = { card: NodeCard };
-const edgeTypes: EdgeTypes = { labeled: EdgeLabel };
+const nodeTypes: NodeTypes = { oval: NodeCard };
+const edgeTypes: EdgeTypes = { floating: EdgeLabel };
 
 export interface GraphProps {
   contract: Contract;
 }
 
-export function Graph({ contract }: GraphProps) {
-  const { nodes, edges } = useMemo(() => {
-    const rfNodes: Node[] = contract.nodes.map((n) => ({
-      id: n.id,
-      type: "card",
-      data: n,
-      position: { x: 0, y: 0 },
-    }));
-    const rfEdges: Edge<EdgeData>[] = contract.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      type: "labeled",
-      data: { edge: e },
-    }));
-    return layoutGraph(rfNodes, rfEdges, {
-      rankdir: "TB",
-      nodesep: 80,
-      ranksep: 100,
-    });
-  }, [contract]);
+export function Graph(props: GraphProps) {
+  return (
+    <ReactFlowProvider>
+      <GraphInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function GraphInner({ contract }: GraphProps) {
+  const {
+    selectedNodeId,
+    selectedEdgeId,
+    toggleSelectedNode,
+    toggleSelectedEdge,
+    clearSelection,
+  } = useContractStore();
+
+  const defaultEdges = useMemo<Edge<EdgeData>[]>(
+    () =>
+      contract.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: "floating",
+        data: { edge: e },
+      })),
+    [contract],
+  );
+
+  // Uncontrolled React Flow: the force simulation drives node positions
+  // via `useReactFlow().setNodes`, so we don't own node state here.
+  useForceLayout(contract, {
+    boostedId: selectedNodeId ?? null,
+  });
+
+  const onNodeClick: NodeMouseHandler = (event, node) => {
+    event.stopPropagation();
+    toggleSelectedNode(node.id);
+  };
+
+  const onEdgeClick: EdgeMouseHandler = (event, edge) => {
+    event.stopPropagation();
+    toggleSelectedEdge(edge.id);
+  };
+
+  const selectedNode = selectedNodeId
+    ? contract.nodes.find((n) => n.id === selectedNodeId) ?? null
+    : null;
+  const selectedEdge = selectedEdgeId
+    ? contract.edges.find((e) => e.id === selectedEdgeId) ?? null
+    : null;
+  const edgeEndpoints = selectedEdge
+    ? {
+        source:
+          contract.nodes.find((n) => n.id === selectedEdge.source)?.name ??
+          selectedEdge.source,
+        target:
+          contract.nodes.find((n) => n.id === selectedEdge.target)?.name ??
+          selectedEdge.target,
+      }
+    : null;
 
   return (
-    <ReactFlow
-      // `key` forces React Flow to remount + re-fit when the contract changes,
-      // which is the simplest way to guarantee the new layout is centered.
-      key={contract.meta?.id ?? `${nodes.length}:${edges.length}`}
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      fitView
-      fitViewOptions={{ padding: 0.2 }}
-      proOptions={{ hideAttribution: true }}
-      minZoom={0.2}
-      maxZoom={1.5}
-    >
-      <Background
-        variant={BackgroundVariant.Dots}
-        gap={24}
-        size={1}
-        color="#1f2540"
-      />
-      <Controls position="bottom-right" showInteractive={false} />
-      <MiniMap
-        pannable
-        zoomable
-        nodeColor="#cbd5e1"
-        maskColor="rgba(11, 16, 32, 0.7)"
-      />
-    </ReactFlow>
+    <div className="relative h-full w-full">
+      <ReactFlow
+        key={contract.meta?.id ?? `${contract.nodes.length}:${contract.edges.length}`}
+        defaultNodes={[]}
+        defaultEdges={defaultEdges}
+        onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
+        onPaneClick={clearSelection}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.3 }}
+        proOptions={{ hideAttribution: true }}
+        minZoom={0.2}
+        maxZoom={1.8}
+        nodesDraggable
+        zoomOnDoubleClick={false}
+      >
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1}
+          color="#1f2540"
+        />
+        <Controls position="bottom-left" showInteractive={false} />
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor="#cbd5e1"
+          maskColor="rgba(11, 16, 32, 0.7)"
+        />
+      </ReactFlow>
+
+      {selectedNode && (
+        <NodeDetailsPopup
+          node={selectedNode}
+          onClose={() => toggleSelectedNode(selectedNode.id)}
+        />
+      )}
+      {selectedEdge && edgeEndpoints && (
+        <EdgeDetailsPopup
+          edge={selectedEdge}
+          sourceName={edgeEndpoints.source}
+          targetName={edgeEndpoints.target}
+          onClose={() => toggleSelectedEdge(selectedEdge.id)}
+        />
+      )}
+    </div>
   );
 }

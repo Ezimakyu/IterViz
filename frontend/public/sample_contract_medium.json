@@ -86,9 +86,9 @@
     },
     {
       "id": "n-cache",
-      "name": "Redis",
+      "name": "Redis Cache",
       "kind": "store",
-      "description": "Rate-limit counters and short-lived session blacklist.",
+      "description": "In-memory store for rate-limit counters and revoked JWT blacklist.",
       "responsibilities": ["Track per-IP request counts", "Hold revoked JWTs"],
       "assumptions": [
         {
@@ -140,9 +140,9 @@
     },
     {
       "id": "n-worker",
-      "name": "Background Worker",
+      "name": "Webhook Worker",
       "kind": "job",
-      "description": "Processes Stripe webhooks asynchronously.",
+      "description": "Background event handler that consumes Stripe webhooks asynchronously.",
       "responsibilities": ["Consume webhook queue", "Update order status"],
       "assumptions": [
         {

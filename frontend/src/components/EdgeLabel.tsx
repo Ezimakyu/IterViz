@@ -1,53 +1,51 @@
+import { useCallback } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  useStore,
   type EdgeProps,
+  type ReactFlowState,
 } from "reactflow";
-import type { ContractEdge, PayloadSchema } from "../types/contract";
+import type { ContractEdge } from "../types/contract";
+import { getEdgeParams } from "../utils/floatingEdges";
+import { EDGE_KIND_COLOR } from "../utils/edgeKind";
+import { useContractStore } from "../state/contract";
 
 export interface EdgeData {
   edge: ContractEdge;
 }
 
-const KIND_COLOR: Record<ContractEdge["kind"], string> = {
-  data: "#60a5fa",
-  control: "#f59e0b",
-  event: "#a78bfa",
-  dependency: "#6b7280",
-};
-
-function payloadSummary(schema: PayloadSchema | null | undefined): string {
-  if (!schema || !schema.properties) return "no payload";
-  const fieldCount = Object.keys(schema.properties).length;
-  return `${schema.type ?? "object"} with ${fieldCount} field${fieldCount === 1 ? "" : "s"}`;
-}
-
 export function EdgeLabel(props: EdgeProps<EdgeData>) {
-  const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    data,
-    markerEnd,
-  } = props;
+  const { id, source, target, data, markerEnd } = props;
+  const selectedEdgeId = useContractStore((s) => s.selectedEdgeId);
+  const toggleSelectedEdge = useContractStore((s) => s.toggleSelectedEdge);
 
+  const sourceNode = useStore(
+    useCallback((s: ReactFlowState) => s.nodeInternals.get(source), [source]),
+  );
+  const targetNode = useStore(
+    useCallback((s: ReactFlowState) => s.nodeInternals.get(target), [target]),
+  );
+
+  if (!sourceNode || !targetNode) return null;
+
+  const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(
+    sourceNode,
+    targetNode,
+  );
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
+    sourceX: sx,
+    sourceY: sy,
+    sourcePosition: sourcePos,
+    targetX: tx,
+    targetY: ty,
+    targetPosition: targetPos,
   });
 
   const edge = data?.edge;
-  const color = edge ? KIND_COLOR[edge.kind] : "#94a3b8";
-  const summary = edge ? payloadSummary(edge.payload_schema) : "";
+  const color = edge ? EDGE_KIND_COLOR[edge.kind] : "#94a3b8";
+  const isSelected = selectedEdgeId === id;
 
   return (
     <>
@@ -55,28 +53,33 @@ export function EdgeLabel(props: EdgeProps<EdgeData>) {
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{ stroke: color, strokeWidth: 1.75 }}
+        style={{
+          stroke: color,
+          strokeWidth: isSelected ? 2.6 : 1.5,
+          opacity: isSelected ? 1 : 0.85,
+        }}
       />
       {edge && (
         <EdgeLabelRenderer>
-          <div
-            className="group pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSelectedEdge(id);
+            }}
+            className="group pointer-events-auto absolute cursor-pointer select-none rounded-full border bg-slate-900/90 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-100 shadow transition hover:scale-[1.05]"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              borderColor: color,
+              color: isSelected ? "#0b1020" : "#e6e8ef",
+              background: isSelected ? color : "rgba(17, 22, 42, 0.9)",
+            }}
+            aria-label={`${edge.kind} edge, click to ${
+              isSelected ? "hide" : "show"
+            } details`}
           >
-            <div
-              className="cursor-default rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-100 shadow"
-              style={{ borderColor: color }}
-            >
-              {edge.kind}
-            </div>
-            <div className="invisible absolute left-1/2 top-full z-10 mt-1 w-44 -translate-x-1/2 rounded border border-slate-600 bg-slate-900 p-2 text-[10px] leading-snug text-slate-100 shadow-lg group-hover:visible">
-              <div className="font-semibold uppercase tracking-wide" style={{ color }}>
-                {edge.kind}
-              </div>
-              {edge.label && <div className="mt-0.5">{edge.label}</div>}
-              <div className="mt-0.5 text-slate-300">payload: {summary}</div>
-            </div>
-          </div>
+            {edge.kind}
+          </button>
         </EdgeLabelRenderer>
       )}
     </>

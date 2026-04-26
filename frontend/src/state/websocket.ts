@@ -1,78 +1,174 @@
-import { useEffect } from "react";
-import { API } from "../api/client";
+import { create } from "zustand";
+import type { WSMessage } from "../types/contract";
+import { useContractStore } from "./contract";
 import { useSubgraphStore } from "./subgraph";
-import type { WSMessage } from "../types/subgraph";
 
 /**
- * Open a WebSocket to ``/sessions/{id}/stream`` and route incoming
- * subgraph events into the Zustand store. Returns nothing -- the hook
- * cleans itself up on unmount or session-id change.
+ * Live WebSocket store for Phase 2.
  *
- * The client stays connected for the lifetime of the session view.
- * The backend currently emits two message types:
- *
- * - ``subgraph_created`` -- a new implementation subgraph was generated.
- * - ``subgraph_node_status_changed`` -- a subgraph node's status moved.
+ * Connects to ``ws://<api>/sessions/<id>/stream`` and dispatches
+ * incoming JSON messages into the contract store so the rest of the
+ * UI can stay declarative.
  */
-export function useSessionStream(sessionId: string | null): void {
-  const upsertSubgraph = useSubgraphStore((s) => s.upsertSubgraph);
-  const updateNodeStatus = useSubgraphStore((s) => s.updateNodeStatus);
 
-  useEffect(() => {
-    if (!sessionId) return;
-    if (typeof window === "undefined") return;
+interface WebSocketState {
+  socket: WebSocket | null;
+  connected: boolean;
+  sessionId: string | null;
+  reconnectAttempts: number;
+  lastError: string | null;
 
-    const url = API.sessionStreamUrl(sessionId);
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(url);
-    } catch (err) {
-      console.warn("[ws] failed to open session stream", err);
-      return;
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as WSMessage;
-        handleMessage(data, upsertSubgraph, updateNodeStatus);
-      } catch (err) {
-        console.warn("[ws] invalid message", err);
-      }
-    };
-
-    ws.onerror = () => {
-      // Errors fire on the same socket close as well -- we just log.
-      console.warn("[ws] connection error");
-    };
-
-    return () => {
-      try {
-        ws.close();
-      } catch {
-        /* socket already closed */
-      }
-    };
-  }, [sessionId, upsertSubgraph, updateNodeStatus]);
+  connect: (sessionId: string) => void;
+  disconnect: () => void;
 }
 
-function handleMessage(
-  msg: WSMessage,
-  upsertSubgraph: ReturnType<typeof useSubgraphStore.getState>["upsertSubgraph"],
-  updateNodeStatus: ReturnType<
-    typeof useSubgraphStore.getState
-  >["updateNodeStatus"],
-): void {
-  switch (msg.type) {
-    case "subgraph_created":
-      upsertSubgraph(msg.subgraph);
-      return;
-    case "subgraph_node_status_changed":
-      updateNodeStatus(
-        msg.parent_node_id,
-        msg.subgraph_node_id,
-        msg.status,
-        msg.progress,
-      );
-      return;
+const WS_BASE = (
+  (import.meta as ImportMeta & { env?: { VITE_WS_BASE?: string } }).env
+    ?.VITE_WS_BASE ?? "ws://localhost:8000/api/v1"
+);
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY_MS = 1500;
+
+function handleMessage(message: WSMessage): void {
+  const store = useContractStore.getState();
+
+  switch (message.type) {
+    case "node_status_changed": {
+      const agent =
+        message.agent_id && message.agent_name
+          ? { id: message.agent_id, name: message.agent_name }
+          : null;
+      store.updateNodeStatus(message.node_id, message.status, agent);
+      break;
+    }
+    case "node_claimed": {
+      store.updateNodeStatus(message.node_id, "in_progress", {
+        id: message.agent_id,
+        name: message.agent_name,
+      });
+      break;
+    }
+    case "node_progress": {
+      store.setNodeProgress(message.node_id, message.progress);
+      break;
+    }
+    case "agent_connected": {
+      store.setAgentInfo(message.agent_id, {
+        id: message.agent_id,
+        name: message.agent_name,
+        type: message.agent_type ?? "custom",
+        status: "active",
+        registered_at: message.timestamp,
+        last_seen_at: message.timestamp,
+      });
+      break;
+    }
+    case "implementation_complete": {
+      store.setImplementationComplete(message.success);
+      break;
+    }
+    case "integration_result": {
+      store.setIntegrationMismatches(message.mismatches);
+      break;
+    }
+    case "error": {
+      console.warn("[ws] error:", message.message);
+      break;
+    }
+    case "subgraph_created": {
+      useSubgraphStore.getState().upsertSubgraph(message.subgraph);
+      break;
+    }
+    case "subgraph_node_status_changed": {
+      useSubgraphStore
+        .getState()
+        .updateNodeStatus(
+          message.parent_node_id,
+          message.subgraph_node_id,
+          message.status,
+          message.progress,
+        );
+      break;
+    }
+    default:
+      break;
   }
 }
+
+export const useWebSocketStore = create<WebSocketState>((set, get) => ({
+  socket: null,
+  connected: false,
+  sessionId: null,
+  reconnectAttempts: 0,
+  lastError: null,
+
+  connect: (sessionId: string) => {
+    const existing = get().socket;
+    if (existing && get().sessionId === sessionId) return;
+    if (existing) {
+      // Detach the close handler before closing so the old socket's
+      // onclose can't schedule a reconnect to the previous session
+      // (which would race with the new connection and silently revert
+      // the store back to the old sessionId once it opens).
+      existing.onclose = null;
+      existing.close();
+    }
+    set({ socket: null, sessionId, reconnectAttempts: 0 });
+
+    const url = `${WS_BASE}/sessions/${sessionId}/stream`;
+
+    const open = (): void => {
+      const socket = new WebSocket(url);
+
+      socket.onopen = () => {
+        set({
+          socket,
+          connected: true,
+          sessionId,
+          reconnectAttempts: 0,
+          lastError: null,
+        });
+      };
+
+      socket.onmessage = (event: MessageEvent<string>) => {
+        try {
+          const data = JSON.parse(event.data) as WSMessage;
+          handleMessage(data);
+        } catch (err) {
+          console.error("[ws] failed to parse message", err);
+        }
+      };
+
+      socket.onclose = () => {
+        set({ connected: false });
+        const attempts = get().reconnectAttempts;
+        if (
+          get().sessionId === sessionId &&
+          attempts < MAX_RECONNECT_ATTEMPTS
+        ) {
+          set({ reconnectAttempts: attempts + 1 });
+          setTimeout(open, RECONNECT_DELAY_MS);
+        }
+      };
+
+      socket.onerror = (event: Event) => {
+        console.warn("[ws] error", event);
+        set({ lastError: "WebSocket connection error" });
+      };
+    };
+
+    open();
+  },
+
+  disconnect: () => {
+    const socket = get().socket;
+    if (socket) socket.close();
+    set({
+      socket: null,
+      connected: false,
+      sessionId: null,
+      reconnectAttempts: 0,
+    });
+  },
+}));

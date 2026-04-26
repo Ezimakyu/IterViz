@@ -1,32 +1,34 @@
-"""Per-session WebSocket fan-out.
+"""WebSocket endpoint for live Phase 2 updates.
 
-Glasshouse maintains a single WebSocket endpoint per session at
-``/api/v1/sessions/{session_id}/stream``. Backend services broadcast
-messages -- subclasses of :class:`~app.schemas.WSMessage` -- and every
-connection currently subscribed to that session receives the JSON
-representation.
-
-This module is intentionally minimal so M5 can extend it with
-node-status, agent-claim, and progress broadcasts without rewriting the
-plumbing.
+A single ``ConnectionManager`` instance tracks active connections per
+session and broadcasts JSON messages as agents work on nodes. Helper
+``broadcast_*`` functions wrap each ``WSMessage`` subtype so callers do
+not need to instantiate models inline.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Optional
 
-try:  # FastAPI is the runtime dep, but we keep this importable in tests.
-    from fastapi import WebSocket, WebSocketDisconnect
-except Exception:  # pragma: no cover - fastapi is part of the runtime deps
-    WebSocket = object  # type: ignore[assignment]
-    WebSocketDisconnect = Exception  # type: ignore[assignment]
+from fastapi import WebSocket
 
 from .logger import get_logger
 from .schemas import (
+    AgentType,
     ImplementationSubgraph,
+    IntegrationMismatch,
+    NodeStatus,
     SubgraphNodeStatus,
+    WSAgentConnected,
+    WSError,
+    WSImplementationComplete,
+    WSIntegrationResult,
     WSMessage,
+    WSNodeClaimed,
+    WSNodeProgress,
+    WSNodeStatusChanged,
     WSSubgraphCreated,
     WSSubgraphNodeStatusChanged,
 )
@@ -35,88 +37,188 @@ log = get_logger(__name__)
 
 
 class ConnectionManager:
-    """Tracks live WebSocket connections per session.
-
-    Connections are kept in a per-session set; broadcast iterates a
-    snapshot to avoid mutating the set while sending.
-    """
+    """Manages WebSocket connections per session."""
 
     def __init__(self) -> None:
-        self._connections: dict[str, set[WebSocket]] = {}
+        # session_id -> list of active connections
+        self._connections: dict[str, list[WebSocket]] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, session_id: str, websocket: WebSocket) -> None:
+        """Accept a new WebSocket connection for a session."""
         await websocket.accept()
         async with self._lock:
-            self._connections.setdefault(session_id, set()).add(websocket)
-        log.info(
+            self._connections.setdefault(session_id, []).append(websocket)
+        log.debug(
             "ws.connected",
             extra={
                 "session_id": session_id,
-                "active_connections": len(self._connections[session_id]),
+                "total_connections": len(self._connections.get(session_id, [])),
             },
         )
 
-    async def disconnect(self, session_id: str, websocket: WebSocket) -> None:
+    async def disconnect(
+        self, session_id: str, websocket: WebSocket
+    ) -> None:
+        """Remove a WebSocket connection (idempotent)."""
         async with self._lock:
-            bucket = self._connections.get(session_id)
-            if bucket is not None:
-                bucket.discard(websocket)
-                if not bucket:
+            connections = self._connections.get(session_id)
+            if connections is not None:
+                try:
+                    connections.remove(websocket)
+                except ValueError:
+                    pass
+                if not connections:
                     self._connections.pop(session_id, None)
-        log.info("ws.disconnected", extra={"session_id": session_id})
+        log.debug("ws.disconnected", extra={"session_id": session_id})
 
-    async def broadcast(self, session_id: str, message: WSMessage) -> int:
-        """Send ``message`` to every connection on ``session_id``.
-
-        Returns the number of connections the message was successfully
-        delivered to. Failed connections are removed from the pool.
-        """
-
+    async def broadcast(self, session_id: str, message: WSMessage) -> None:
+        """Send a JSON-serialized message to all connections for a session."""
         async with self._lock:
-            connections = list(self._connections.get(session_id, ()))
+            connections = list(self._connections.get(session_id, []))
 
         if not connections:
-            return 0
+            return
 
         payload = message.model_dump(mode="json")
-        delivered = 0
-        stale: list[WebSocket] = []
-        for ws in connections:
+        data_str = json.dumps(payload)
+
+        log.debug(
+            "ws.broadcast",
+            extra={
+                "session_id": session_id,
+                "type": payload.get("type"),
+                "recipients": len(connections),
+            },
+        )
+
+        dead: list[WebSocket] = []
+        for connection in connections:
             try:
-                await ws.send_json(payload)
-                delivered += 1
-            except Exception as exc:  # pragma: no cover - depends on socket state
-                log.warning(
-                    "ws.send_failed",
-                    extra={"session_id": session_id, "error": str(exc)},
-                )
-                stale.append(ws)
+                await connection.send_text(data_str)
+            except Exception:  # pragma: no cover - defensive
+                dead.append(connection)
 
-        if stale:
-            async with self._lock:
-                bucket = self._connections.get(session_id)
-                if bucket is not None:
-                    for ws in stale:
-                        bucket.discard(ws)
-                    if not bucket:
-                        self._connections.pop(session_id, None)
+        for conn in dead:
+            await self.disconnect(session_id, conn)
 
-        return delivered
+    def get_connection_count(self, session_id: str) -> int:
+        """Synchronous accessor for the number of active connections."""
+        return len(self._connections.get(session_id, []))
 
-    def connection_count(self, session_id: Optional[str] = None) -> int:
-        """Diagnostic helper: number of live connections."""
-
-        if session_id is None:
-            return sum(len(v) for v in self._connections.values())
-        return len(self._connections.get(session_id, ()))
+    def reset(self) -> None:
+        """Drop all in-memory connections (test helper)."""
+        self._connections.clear()
 
 
+# Global connection manager instance shared across the FastAPI app.
 manager = ConnectionManager()
 
 
 # ---------------------------------------------------------------------------
-# Broadcast helpers (M6)
+# Broadcast helpers
+# ---------------------------------------------------------------------------
+
+async def broadcast_node_status_changed(
+    session_id: str,
+    node_id: str,
+    status: NodeStatus,
+    agent_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> None:
+    """Broadcast a node status change."""
+    msg = WSNodeStatusChanged(
+        node_id=node_id,
+        status=status,
+        agent_id=agent_id,
+        agent_name=agent_name,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_node_claimed(
+    session_id: str,
+    node_id: str,
+    agent_id: str,
+    agent_name: str,
+) -> None:
+    """Broadcast that a node was claimed by an agent."""
+    msg = WSNodeClaimed(
+        node_id=node_id,
+        agent_id=agent_id,
+        agent_name=agent_name,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_node_progress(
+    session_id: str,
+    node_id: str,
+    agent_id: str,
+    progress: float,
+    message: Optional[str] = None,
+) -> None:
+    """Broadcast a progress update for a node."""
+    msg = WSNodeProgress(
+        node_id=node_id,
+        agent_id=agent_id,
+        progress=progress,
+        message=message,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_agent_connected(
+    session_id: str,
+    agent_id: str,
+    agent_name: str,
+    agent_type: Optional[AgentType] = None,
+) -> None:
+    """Broadcast that an agent connected to a session."""
+    msg = WSAgentConnected(
+        agent_id=agent_id,
+        agent_name=agent_name,
+        agent_type=agent_type,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_implementation_complete(
+    session_id: str,
+    success: bool,
+    nodes_implemented: int,
+    nodes_failed: int,
+) -> None:
+    """Broadcast that the implementation phase finished."""
+    msg = WSImplementationComplete(
+        success=success,
+        nodes_implemented=nodes_implemented,
+        nodes_failed=nodes_failed,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_integration_result(
+    session_id: str,
+    mismatches: list[IntegrationMismatch],
+) -> None:
+    """Broadcast the integration pass results (mismatches)."""
+    msg = WSIntegrationResult(mismatches=list(mismatches))
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_error(
+    session_id: str,
+    message: str,
+    recoverable: bool = True,
+) -> None:
+    """Broadcast a server-side error to clients of a session."""
+    msg = WSError(message=message, recoverable=recoverable)
+    await manager.broadcast(session_id, msg)
+
+
+# ---------------------------------------------------------------------------
+# M6: subgraph broadcast helpers
 # ---------------------------------------------------------------------------
 
 
@@ -124,22 +226,13 @@ async def broadcast_subgraph_created(
     session_id: str,
     parent_node_id: str,
     subgraph: ImplementationSubgraph,
-) -> int:
+) -> None:
+    """Broadcast that an implementation subgraph was generated."""
     msg = WSSubgraphCreated(
         parent_node_id=parent_node_id,
         subgraph=subgraph,
     )
-    delivered = await manager.broadcast(session_id, msg)
-    log.info(
-        "ws.broadcast.subgraph_created",
-        extra={
-            "session_id": session_id,
-            "parent_node_id": parent_node_id,
-            "subgraph_id": subgraph.id,
-            "delivered_to": delivered,
-        },
-    )
-    return delivered
+    await manager.broadcast(session_id, msg)
 
 
 async def broadcast_subgraph_node_status_changed(
@@ -148,31 +241,29 @@ async def broadcast_subgraph_node_status_changed(
     subgraph_node_id: str,
     status: SubgraphNodeStatus,
     progress: float,
-) -> int:
+) -> None:
+    """Broadcast a status transition for a subgraph node."""
     msg = WSSubgraphNodeStatusChanged(
         parent_node_id=parent_node_id,
         subgraph_node_id=subgraph_node_id,
         status=status,
         progress=progress,
     )
-    delivered = await manager.broadcast(session_id, msg)
-    log.info(
-        "ws.broadcast.subgraph_node_status",
-        extra={
-            "session_id": session_id,
-            "parent_node_id": parent_node_id,
-            "subgraph_node_id": subgraph_node_id,
-            "status": status.value if hasattr(status, "value") else status,
-            "progress": progress,
-            "delivered_to": delivered,
-        },
-    )
-    return delivered
+    await manager.broadcast(session_id, msg)
 
 
 __all__ = [
     "ConnectionManager",
     "manager",
+    "broadcast_node_status_changed",
+    "broadcast_node_claimed",
+    "broadcast_node_progress",
+    "broadcast_agent_connected",
+    "broadcast_implementation_complete",
+    "broadcast_integration_result",
+    "broadcast_error",
     "broadcast_subgraph_created",
     "broadcast_subgraph_node_status_changed",
 ]
+
+

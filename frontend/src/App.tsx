@@ -2,6 +2,7 @@ import { Graph } from "./components/Graph";
 import { ControlBar } from "./components/ControlBar";
 import { PromptInput } from "./components/PromptInput";
 import { QuestionPanel } from "./components/QuestionPanel";
+import { AgentPanel } from "./components/AgentPanel";
 import { useContractStore } from "./state/contract";
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Graph contract={contract} />
         </div>
         <QuestionPanel />
+        <AgentPanel />
       </main>
     </div>
   );

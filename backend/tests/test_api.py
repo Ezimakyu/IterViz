@@ -397,3 +397,113 @@ def test_refine_with_empty_body_uses_existing_decisions(client):
         f"/api/v1/sessions/{sid}/architect/refine", json={}
     )
     assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# M5: freeze / implement / agents / generated
+# ---------------------------------------------------------------------------
+
+
+def test_register_and_list_agent(client):
+    resp = client.post("/api/v1/agents", json={"name": "Devin", "type": "devin"})
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["agent_id"]
+    assert body["agent"]["name"] == "Devin"
+
+    listed = client.get("/api/v1/agents")
+    assert listed.status_code == 200
+    assert any(a["id"] == body["agent_id"] for a in listed.json()["agents"])
+
+
+def test_freeze_then_implement_external(client, monkeypatch, tmp_path):
+    from app import orchestrator as orchestrator_svc
+
+    orchestrator_svc.set_generated_dir(tmp_path / "generated")
+
+    body = _create_session(client)
+    sid = body["session_id"]
+
+    # Freeze should succeed.
+    frozen = client.post(f"/api/v1/sessions/{sid}/freeze")
+    assert frozen.status_code == 200, frozen.text
+    fbody = frozen.json()
+    assert fbody["frozen_hash"]
+    assert fbody["contract"]["meta"]["status"] == "verified"
+
+    # Re-freezing returns the same hash (idempotent).
+    again = client.post(f"/api/v1/sessions/{sid}/freeze")
+    assert again.status_code == 200
+    assert again.json()["frozen_hash"] == fbody["frozen_hash"]
+
+    # Implement (external mode = no background work, just creates assignments).
+    impl = client.post(
+        f"/api/v1/sessions/{sid}/implement", json={"mode": "external"}
+    )
+    assert impl.status_code == 200, impl.text
+    ibody = impl.json()
+    assert ibody["assignments_created"] >= 3
+    assert ibody["mode"] == "external"
+
+    # Register an agent and poll for an assignment.
+    agent_resp = client.post(
+        "/api/v1/agents", json={"name": "ext", "type": "custom"}
+    )
+    agent_id = agent_resp.json()["agent_id"]
+
+    poll = client.get(
+        f"/api/v1/sessions/{sid}/assignments?agent_id={agent_id}"
+    )
+    assert poll.status_code == 200
+    assignment = poll.json()["assignment"]
+    assert assignment is not None
+    node_id = assignment["payload"]["node"]["id"]
+
+    # Claim the node.
+    claim = client.post(
+        f"/api/v1/sessions/{sid}/nodes/{node_id}/claim",
+        json={"agent_id": agent_id},
+    )
+    assert claim.status_code == 200, claim.text
+    assert claim.json()["success"] is True
+
+    # Submit an implementation.
+    submit = client.post(
+        f"/api/v1/sessions/{sid}/nodes/{node_id}/implementation",
+        json={
+            "agent_id": agent_id,
+            "file_paths": ["foo.py"],
+            "actual_interface": {
+                "exports": ["main"],
+                "imports": [],
+                "public_functions": [
+                    {"name": "main", "signature": "def main() -> None"}
+                ],
+            },
+            "notes": "ok",
+        },
+    )
+    assert submit.status_code == 200, submit.text
+    assert submit.json()["success"] is True
+
+    orchestrator_svc.set_generated_dir(None)
+
+
+def test_implement_requires_frozen(client):
+    body = _create_session(client)
+    sid = body["session_id"]
+    impl = client.post(
+        f"/api/v1/sessions/{sid}/implement", json={"mode": "external"}
+    )
+    assert impl.status_code == 400
+
+
+def test_freeze_unknown_session_404(client):
+    resp = client.post("/api/v1/sessions/does-not-exist/freeze")
+    assert resp.status_code == 404
+
+
+def test_get_assignment_returns_null_when_no_session_assignments(client):
+    resp = client.get("/api/v1/sessions/some-session/assignments?agent_id=x")
+    assert resp.status_code == 200
+    assert resp.json()["assignment"] is None

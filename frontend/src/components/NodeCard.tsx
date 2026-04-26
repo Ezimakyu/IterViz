@@ -39,17 +39,30 @@ function confidenceColor(confidence: number): string {
   return "bg-green-500";
 }
 
+const STATUS_RING: Record<
+  NonNullable<ContractNode["status"]>,
+  string
+> = {
+  drafted: "",
+  in_progress: "!ring-yellow-400 ring-[4px] animate-pulse",
+  implemented: "!ring-emerald-500 ring-[4px]",
+  failed: "!ring-red-500 ring-[4px]",
+};
+
 function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const { node, tier } = data;
   const confidencePct = Math.round(node.confidence * 100);
   const selectedNodeId = useContractStore((s) => s.selectedNodeId);
   const previousContract = useContractStore((s) => s.previousContract);
+  const nodeAgents = useContractStore((s) => s.nodeAgents);
   const userEditedFields = useContractStore((s) => s.userEditedFields);
   const provenanceView = useContractStore((s) => s.provenanceView);
   const openBigPicturePopup = useSubgraphStore((s) => s.openBigPicturePopup);
   const hasSubgraph = useSubgraphStore((s) => Boolean(s.subgraphs[id]));
   const isSpotlight = selectedNodeId === id;
   const size = TIER_SIZE[tier];
+  const statusRing = STATUS_RING[node.status] ?? "";
+  const agentInfo = nodeAgents.get(id);
 
   // Diff highlight: yellow ring/badge when this node changed (or is new).
   const prev = previousContract?.nodes.find((n) => n.id === id);
@@ -78,6 +91,7 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
           ? "border-sky-500 shadow-sky-500/30"
           : "border-slate-400",
         isNew || isChanged ? "!ring-yellow-400/80 ring-[3px]" : "",
+        statusRing,
         isUserEdited ? "!ring-blue-500/80 ring-[3px] shadow-blue-500/30" : "",
         provenanceView && !isUserEdited ? "opacity-60" : "",
       ].join(" ")}
@@ -103,6 +117,14 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
       {isNew && (
         <span className="absolute -top-2 right-1 rounded bg-yellow-400 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-900">
           NEW
+        </span>
+      )}
+      {agentInfo && (
+        <span
+          className="absolute -top-2 left-1 max-w-[80%] truncate rounded bg-violet-500 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white"
+          title={`Claimed by ${agentInfo.agentName}`}
+        >
+          {agentInfo.agentName}
         </span>
       )}
       {isUserEdited && !isNew && (

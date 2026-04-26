@@ -20,7 +20,6 @@ import { SubgraphView } from "./SubgraphView";
 import { useForceLayout } from "../hooks/useForceLayout";
 import { useContractStore } from "../state/contract";
 import { useSubgraphStore } from "../state/subgraph";
-import { useSessionStream } from "../state/websocket";
 import { buildHierarchy } from "../utils/hierarchy";
 import { API, isApiError } from "../api/client";
 
@@ -57,9 +56,9 @@ function GraphInner({ contract }: GraphProps) {
   const setActiveSubgraph = useSubgraphStore((s) => s.setActiveSubgraph);
   const upsertSubgraph = useSubgraphStore((s) => s.upsertSubgraph);
   const subgraphCache = useSubgraphStore((s) => s.subgraphs);
-
-  // Subscribe to live updates (subgraph_created / subgraph_node_status_changed).
-  useSessionStream(sessionId);
+  // M5's ControlBar already opens the session WebSocket via
+  // `useWebSocketStore.connect`; subgraph events are routed by the same
+  // store handler -- no extra subscription needed here.
 
   const userEditedCount = useMemo(
     () =>

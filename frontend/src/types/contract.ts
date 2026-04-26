@@ -22,6 +22,19 @@ export interface Assumption {
   load_bearing: boolean;
 }
 
+export interface ActualInterface {
+  exports?: string[];
+  imports?: string[];
+  public_functions?: Array<{ name?: string; signature?: string }>;
+}
+
+export interface Implementation {
+  file_paths?: string[];
+  notes?: string | null;
+  actual_interface?: ActualInterface | null;
+  completed_at?: string | null;
+}
+
 export interface ContractNode {
   id: string;
   name: string;
@@ -33,6 +46,7 @@ export interface ContractNode {
   open_questions?: string[];
   decided_by?: DecidedBy;
   status: NodeStatus;
+  implementation?: Implementation | null;
 }
 
 export interface PayloadSchema {
@@ -130,3 +144,161 @@ export interface ContractDiff {
   n_edges_before?: number;
   n_edges_after?: number;
 }
+
+// ---------------------------------------------------------------------------
+// M5: Phase 2 orchestration types
+// ---------------------------------------------------------------------------
+
+export type AgentType =
+  | "devin"
+  | "cursor"
+  | "claude"
+  | "custom"
+  | "internal";
+
+export type AgentStatus = "active" | "idle" | "disconnected";
+
+export type AssignmentStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "failed";
+
+export type ImplementMode = "internal" | "external";
+
+export interface Agent {
+  id: string;
+  name: string;
+  type: AgentType;
+  registered_at: string;
+  last_seen_at: string;
+  status: AgentStatus;
+  current_assignment?: string | null;
+}
+
+export interface IntegrationMismatch {
+  id: string;
+  edge_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  declared_schema?: Record<string, unknown> | null;
+  actual_source_interface?: ActualInterface | null;
+  actual_target_interface?: ActualInterface | null;
+  mismatch_description: string;
+  severity: "error" | "warning";
+}
+
+export interface FreezeResponse {
+  contract: Contract;
+  frozen_hash: string;
+}
+
+export interface ImplementResponse {
+  job_id: string;
+  mode: ImplementMode;
+  assignments_created: number;
+}
+
+export interface RegisterAgentResponse {
+  agent_id: string;
+  agent: Agent;
+}
+
+export interface ListAgentsResponse {
+  agents: Agent[];
+}
+
+export type WSMessageType =
+  | "contract_updated"
+  | "node_status_changed"
+  | "node_progress"
+  | "node_claimed"
+  | "agent_connected"
+  | "implementation_complete"
+  | "integration_result"
+  | "error"
+  // M6: implementation subgraph events
+  | "subgraph_created"
+  | "subgraph_node_status_changed";
+
+export interface WSMessageBase {
+  type: WSMessageType;
+  timestamp: string;
+}
+
+export interface WSNodeStatusChanged extends WSMessageBase {
+  type: "node_status_changed";
+  node_id: string;
+  status: NodeStatus;
+  agent_id?: string | null;
+  agent_name?: string | null;
+}
+
+export interface WSNodeProgress extends WSMessageBase {
+  type: "node_progress";
+  node_id: string;
+  agent_id: string;
+  progress: number;
+  message?: string | null;
+}
+
+export interface WSNodeClaimed extends WSMessageBase {
+  type: "node_claimed";
+  node_id: string;
+  agent_id: string;
+  agent_name: string;
+}
+
+export interface WSAgentConnected extends WSMessageBase {
+  type: "agent_connected";
+  agent_id: string;
+  agent_name: string;
+  agent_type?: AgentType | null;
+}
+
+export interface WSImplementationComplete extends WSMessageBase {
+  type: "implementation_complete";
+  success: boolean;
+  nodes_implemented: number;
+  nodes_failed: number;
+}
+
+export interface WSIntegrationResult extends WSMessageBase {
+  type: "integration_result";
+  mismatches: IntegrationMismatch[];
+}
+
+export interface WSErrorMessage extends WSMessageBase {
+  type: "error";
+  message: string;
+  recoverable: boolean;
+}
+
+export interface WSSubgraphCreated extends WSMessageBase {
+  type: "subgraph_created";
+  parent_node_id: string;
+  // ImplementationSubgraph is defined in ../types/subgraph; using a
+  // structural import here would create a cycle. The handler casts it
+  // to the canonical type at the dispatch site.
+  subgraph: import("./subgraph").ImplementationSubgraph;
+}
+
+export interface WSSubgraphNodeStatusChanged extends WSMessageBase {
+  type: "subgraph_node_status_changed";
+  parent_node_id: string;
+  subgraph_node_id: string;
+  status: import("./subgraph").SubgraphNodeStatus;
+  progress: number;
+}
+
+export type WSMessage =
+  | WSNodeStatusChanged
+  | WSNodeProgress
+  | WSNodeClaimed
+  | WSAgentConnected
+  | WSImplementationComplete
+  | WSIntegrationResult
+  | WSErrorMessage
+  | WSSubgraphCreated
+  | WSSubgraphNodeStatusChanged
+  | (WSMessageBase & { type: "contract_updated" });

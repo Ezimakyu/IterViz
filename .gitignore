@@ -1,3 +1,9 @@
+# Archived folder ignored
+archived-work/
+
+
+### Additional background files to ignore 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -56,4 +62,3 @@ Thumbs.db
 # Local config
 .env.local
 .env.*.local
-test-plan.md

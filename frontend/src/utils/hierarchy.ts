@@ -36,7 +36,7 @@ export const TIER_CHARGE: Record<Tier, number> = {
 };
 
 /** Width of each L->R rank column in the semantic flow layout. */
-export const RANK_SPACING = 260;
+export const RANK_SPACING = 360;
 
 /**
  * Classify nodes into hierarchy tiers and compute a DAG-style rank

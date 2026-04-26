@@ -34,9 +34,12 @@ interface SimNode extends SimulationNodeDatum {
 type SimLink = SimulationLinkDatum<SimNode> & { id: string };
 
 const BOOST_CHARGE = -2800;
-const LINK_DISTANCE = 240;
-const CHILD_LINK_DISTANCE = 130;
-const LABEL_CLEARANCE = 72;
+const LINK_DISTANCE = 280;
+const CHILD_LINK_DISTANCE = 150;
+/** Min clearance from any edge midpoint to a non-adjacent node. */
+const LABEL_CLEARANCE = 110;
+/** Min clearance between two edge midpoints (label-vs-label). */
+const LABEL_LABEL_CLEARANCE = 90;
 
 interface Options {
   boostedId: string | null;
@@ -152,6 +155,50 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
       }
     };
 
+    // Label-vs-label repulsion: when two edge midpoints would draw
+    // their kind pills on top of each other, nudge their endpoint
+    // nodes apart so the labels separate. Edges that share an
+    // endpoint are skipped (they'll inevitably be close).
+    const labelLabelRepel = (alpha: number) => {
+      const mids: { lx: number; ly: number; s: SimNode; t: SimNode }[] = [];
+      for (const link of simLinks) {
+        const s = link.source as SimNode | string;
+        const t = link.target as SimNode | string;
+        if (typeof s === "string" || typeof t === "string") continue;
+        mids.push({
+          lx: ((s.x ?? 0) + (t.x ?? 0)) / 2,
+          ly: ((s.y ?? 0) + (t.y ?? 0)) / 2,
+          s,
+          t,
+        });
+      }
+      const minR = LABEL_LABEL_CLEARANCE;
+      for (let i = 0; i < mids.length; i++) {
+        for (let j = i + 1; j < mids.length; j++) {
+          const a = mids[i];
+          const b = mids[j];
+          if (a.s === b.s || a.s === b.t || a.t === b.s || a.t === b.t)
+            continue;
+          const dx = a.lx - b.lx;
+          const dy = a.ly - b.ly;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          if (dist < minR) {
+            const push = ((minR - dist) / dist) * alpha * 0.5;
+            const fx = dx * push * 0.5;
+            const fy = dy * push * 0.5;
+            a.s.vx = (a.s.vx ?? 0) + fx;
+            a.s.vy = (a.s.vy ?? 0) + fy;
+            a.t.vx = (a.t.vx ?? 0) + fx;
+            a.t.vy = (a.t.vy ?? 0) + fy;
+            b.s.vx = (b.s.vx ?? 0) - fx;
+            b.s.vy = (b.s.vy ?? 0) - fy;
+            b.t.vx = (b.t.vx ?? 0) - fx;
+            b.t.vy = (b.t.vy ?? 0) - fy;
+          }
+        }
+      }
+    };
+
     // Snowflake clustering: pull each child toward its parent's current
     // Y so children orbit near the parent instead of drifting off.
     const parentMap = new Map(simNodes.map((n) => [n.id, n]));
@@ -176,6 +223,7 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
       .force("flowX", flowX)
       .force("centerY", centerY)
       .force("labelRepel", labelRepel)
+      .force("labelLabelRepel", labelLabelRepel)
       .force("snowflake", snowflake)
       .alpha(1)
       .alphaDecay(0.012)

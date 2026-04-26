@@ -56,3 +56,4 @@ Thumbs.db
 # Local config
 .env.local
 .env.*.local
+test-plan.md

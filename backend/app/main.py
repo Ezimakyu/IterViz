@@ -6,11 +6,12 @@ import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import contract as contract_svc
 from . import llm as llm_svc
+from . import ws as ws_svc
 from .api import router as api_router
 from .logger import get_logger
 
@@ -81,6 +82,19 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["meta"])
     def _health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.websocket("/api/v1/sessions/{session_id}/stream")
+    async def _ws_stream(websocket: WebSocket, session_id: str) -> None:
+        """WebSocket endpoint for live Phase 2 updates."""
+        await ws_svc.manager.connect(session_id, websocket)
+        try:
+            while True:
+                # We currently don't act on client -> server messages,
+                # but receive_text keeps the connection alive and lets
+                # us drain any pings the client sends.
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            await ws_svc.manager.disconnect(session_id, websocket)
 
     app.include_router(api_router)
     return app

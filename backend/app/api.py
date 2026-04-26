@@ -18,8 +18,6 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     HTTPException,
-    WebSocket,
-    WebSocketDisconnect,
     status,
 )
 from fastapi.responses import FileResponse
@@ -412,30 +410,10 @@ async def update_subgraph_node(
     return UpdateSubgraphNodeResponse(success=True, subgraph=updated)
 
 
-# ---------------------------------------------------------------------------
-# M6: Session WebSocket stream
-# ---------------------------------------------------------------------------
-
-
-@router.websocket("/sessions/{session_id}/stream")
-async def session_stream(websocket: WebSocket, session_id: str) -> None:
-    """Bidirectional stream for live session events.
-
-    The server only broadcasts; client-sent frames are read and
-    discarded so the connection lifecycle stays under the client's
-    control. M5 will extend the broadcast set with node-status events.
-    """
-
-    await ws_svc.manager.connect(session_id, websocket)
-    try:
-        while True:
-            # We don't expect commands today, but receiving keeps the
-            # connection alive and lets us notice client disconnects.
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await ws_svc.manager.disconnect(session_id, websocket)
+# The session WebSocket endpoint lives on the FastAPI app itself (see
+# ``main.create_app``); registering it on the router would shadow that
+# handler depending on registration order, so M6 reuses the canonical
+# one.
 
 
 # ---------------------------------------------------------------------------

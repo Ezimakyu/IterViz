@@ -60,8 +60,73 @@ export interface ContractMeta {
   stated_intent?: string;
 }
 
+export interface Decision {
+  id: string;
+  question: string;
+  answer: string;
+  answered_at?: string;
+  affects?: string[];
+  source_violation_id?: string | null;
+}
+
+export interface VerificationLogEntry {
+  id?: string;
+  run_at?: string;
+  verdict: "pass" | "fail";
+  violations?: Violation[];
+  questions?: string[];
+  intent_guess?: string;
+  uvdc_score?: number;
+}
+
 export interface Contract {
   meta?: ContractMeta;
   nodes: ContractNode[];
   edges: ContractEdge[];
+  decisions?: Decision[];
+  verification_log?: VerificationLogEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Compiler / verification types
+// ---------------------------------------------------------------------------
+
+export type ViolationType =
+  | "intent_mismatch"
+  | "invariant"
+  | "failure_scenario"
+  | "provenance";
+
+export type ViolationSeverity = "error" | "warning";
+
+export interface Violation {
+  id?: string;
+  type: ViolationType;
+  severity: ViolationSeverity;
+  message: string;
+  affects?: string[];
+  suggested_question?: string;
+}
+
+export interface CompilerResponse {
+  verdict: "pass" | "fail";
+  violations: Violation[];
+  questions: string[];
+  intent_guess?: string;
+  uvdc_score: number;
+  confidence_updates?: Array<{
+    node_id: string;
+    new_confidence: number;
+    reasoning: string;
+  }>;
+}
+
+export interface ContractDiff {
+  previous_version?: number;
+  new_version?: number;
+  n_decisions?: number;
+  n_nodes_before?: number;
+  n_nodes_after?: number;
+  n_edges_before?: number;
+  n_edges_after?: number;
 }

@@ -295,6 +295,56 @@ class Contract(BaseModel):
 # Compiler I/O
 # ---------------------------------------------------------------------------
 
+class NodeConfidenceUpdate(BaseModel):
+    """Returned by the Compiler LLM for each node it evaluates.
+
+    ``reasoning`` is required so we can audit *why* the Compiler nudged the
+    confidence one way or the other. Capturing this is critical for
+    debugging the M3 confidence-improvement loop.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    node_id: str
+    new_confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str = ""
+
+
+class ConfidenceSummary(BaseModel):
+    """Aggregate stats across a multi-pass Compiler run."""
+
+    model_config = ConfigDict(extra="allow")
+
+    nodes_improved: int = 0
+    nodes_unchanged: int = 0  # were already at 1.0 OR did not change
+    nodes_degraded: int = 0  # confidence decreased — flag for investigation
+    average_delta: float = 0.0
+    degraded_node_ids: list[str] = Field(default_factory=list)
+
+
+class ConfidenceSnapshot(BaseModel):
+    """Snapshot of all node confidences at a single point in time."""
+
+    model_config = ConfigDict(extra="allow")
+
+    pass_number: int
+    timestamp: str  # ISO8601
+    nodes: list[NodeConfidenceUpdate] = Field(default_factory=list)
+
+
+class ConfidenceReport(BaseModel):
+    """Final structured report after all Compiler passes complete."""
+
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str
+    total_passes: int
+    initial_snapshot: ConfidenceSnapshot
+    final_snapshot: ConfidenceSnapshot
+    per_pass_snapshots: list[ConfidenceSnapshot] = Field(default_factory=list)
+    summary: ConfidenceSummary
+
+
 class CompilerOutput(BaseModel):
     """What the Blind Compiler returns for a single run.
 
@@ -307,6 +357,8 @@ class CompilerOutput(BaseModel):
     violations: list[Violation] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list, max_length=5)
     intent_guess: str
+    uvdc_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence_updates: list[NodeConfidenceUpdate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _verdict_consistency(self) -> "CompilerOutput":
@@ -354,7 +406,9 @@ class GetSessionResponse(BaseModel):
 class RefineRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    answers: list[Decision]
+    # Optional: when omitted, the API uses the contract's existing
+    # ``decisions[]`` so the frontend can run answers + refine cleanly.
+    answers: list[Decision] = Field(default_factory=list)
 
 
 class RefineResponse(BaseModel):
@@ -362,6 +416,40 @@ class RefineResponse(BaseModel):
 
     contract: Contract
     diff: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# M3: Compiler / Answers API request / response models
+# ---------------------------------------------------------------------------
+
+
+class CompilerResponse(BaseModel):
+    """Response from POST /sessions/{id}/compiler/verify."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    verdict: Verdict
+    violations: list[Violation] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list, max_length=5)
+    intent_guess: str = ""
+    uvdc_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence_updates: list[NodeConfidenceUpdate] = Field(default_factory=list)
+
+
+class AnswersRequest(BaseModel):
+    """Body for POST /sessions/{id}/answers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decisions: list[Decision]
+
+
+class ContractResponse(BaseModel):
+    """Generic response that just wraps an updated contract."""
+
+    model_config = ConfigDict(extra="allow")
+
+    contract: Contract
 
 
 __all__ = [
@@ -390,9 +478,16 @@ __all__ = [
     "VerificationLogEntry",
     "Contract",
     "CompilerOutput",
+    "NodeConfidenceUpdate",
+    "ConfidenceSummary",
+    "ConfidenceSnapshot",
+    "ConfidenceReport",
     "CreateSessionRequest",
     "CreateSessionResponse",
     "GetSessionResponse",
     "RefineRequest",
     "RefineResponse",
+    "CompilerResponse",
+    "AnswersRequest",
+    "ContractResponse",
 ]

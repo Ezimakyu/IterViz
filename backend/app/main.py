@@ -94,6 +94,11 @@ def create_app() -> FastAPI:
                 # us drain any pings the client sends.
                 await websocket.receive_text()
         except WebSocketDisconnect:
+            pass
+        finally:
+            # Always release the connection so an abnormal close
+            # (RuntimeError, network error) doesn't leave a stale
+            # reference in ConnectionManager._connections.
             await ws_svc.manager.disconnect(session_id, websocket)
 
     app.include_router(api_router)

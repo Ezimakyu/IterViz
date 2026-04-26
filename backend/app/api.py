@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from . import agents as agents_svc
 from . import architect as architect_svc
@@ -260,6 +261,14 @@ async def claim_node(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
 
+    # Verify the node exists in the contract BEFORE mutating any
+    # assignment/agent state, so an unknown node id can't leave an
+    # assignment stuck IN_PROGRESS or an agent marked as busy.
+    contract = session.contract
+    target_node = next((n for n in contract.nodes if n.id == node_id), None)
+    if target_node is None:
+        return ClaimNodeResponse(success=False, error="Node not found")
+
     assignment = assignments_svc.claim_assignment(
         session_id, node_id, request.agent_id
     )
@@ -271,11 +280,6 @@ async def claim_node(
 
     agent = agents_svc.set_agent_assignment(request.agent_id, assignment.id)
     agent_name = agent.name if agent is not None else "Unknown"
-
-    contract = session.contract
-    target_node = next((n for n in contract.nodes if n.id == node_id), None)
-    if target_node is None:
-        return ClaimNodeResponse(success=False, error="Node not found")
 
     target_node.status = NodeStatus.IN_PROGRESS
     persisted = contract_svc.update_contract(session_id, contract)
@@ -343,6 +347,14 @@ async def submit_implementation(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
 
+    # Verify the node exists BEFORE completing the assignment, so an
+    # unknown node id can't silently mark the assignment COMPLETED
+    # without ever updating the contract.
+    contract = session.contract
+    target_node = next((n for n in contract.nodes if n.id == node_id), None)
+    if target_node is None:
+        return SubmitImplementationResponse(success=False, node=None)
+
     assignment = assignments_svc.complete_assignment(
         session_id=session_id,
         node_id=node_id,
@@ -355,11 +367,6 @@ async def submit_implementation(
         return SubmitImplementationResponse(success=False, node=None)
 
     agents_svc.set_agent_assignment(request.agent_id, None)
-
-    contract = session.contract
-    target_node = next((n for n in contract.nodes if n.id == node_id), None)
-    if target_node is None:
-        return SubmitImplementationResponse(success=False, node=None)
 
     target_node.status = NodeStatus.IMPLEMENTED
     target_node.implementation = Implementation(
@@ -511,8 +518,11 @@ def download_generated(session_id: str) -> FileResponse:
             if file_path.is_file():
                 zf.write(file_path, file_path.relative_to(output_dir))
 
+    # Schedule the temp zip for deletion AFTER the response is sent so
+    # we don't leak files in the OS temp directory on every download.
     return FileResponse(
         str(tmp_path),
         media_type="application/zip",
         filename=f"generated_{session_id}.zip",
+        background=BackgroundTask(tmp_path.unlink, missing_ok=True),
     )

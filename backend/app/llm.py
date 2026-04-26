@@ -22,10 +22,14 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Type, TypeVar
+
+from pydantic import BaseModel
 
 from .logger import get_logger
 from .schemas import CompilerOutput, Contract
+
+T = TypeVar("T", bound=BaseModel)
 
 log = get_logger(__name__)
 
@@ -161,4 +165,73 @@ def call_compiler(
     return result
 
 
-__all__ = ["call_compiler"]
+def load_prompt(name: str) -> str:
+    """Load a system prompt by name from ``app/prompts/<name>.md``."""
+    path = Path(__file__).parent / "prompts" / f"{name}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt template not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def call_structured(
+    *,
+    response_model: Type[T],
+    system: str,
+    user: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: float = 0.0,
+    max_tokens: int = 4096,
+    max_retries: int = 2,
+) -> T:
+    """Generic structured-output call.
+
+    Used by agents (Architect, Subagents, Integrator) that need a
+    Pydantic-validated response but don't share the Compiler's specific
+    contract-in / output-out signature.
+    """
+    provider = _resolve_provider(provider)
+    model = _resolve_model(provider, model)
+    client = _build_client(provider)
+
+    log.debug(
+        "llm call started",
+        extra={
+            "provider": provider,
+            "model": model,
+            "response_model": response_model.__name__,
+            "system_preview": system[:240],
+            "user_preview": user[:240],
+        },
+    )
+    start = time.perf_counter()
+
+    common_kwargs: dict[str, Any] = {
+        "model": model,
+        "response_model": response_model,
+        "temperature": temperature,
+        "max_retries": max_retries,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if provider == "anthropic":
+        common_kwargs["max_tokens"] = max_tokens
+
+    result: T = client.chat.completions.create(**common_kwargs)
+    duration_ms = int((time.perf_counter() - start) * 1000)
+
+    log.info(
+        "llm call completed",
+        extra={
+            "provider": provider,
+            "model": model,
+            "response_model": response_model.__name__,
+            "duration_ms": duration_ms,
+        },
+    )
+    return result
+
+
+__all__ = ["call_compiler", "call_structured", "load_prompt"]

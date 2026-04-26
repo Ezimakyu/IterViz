@@ -322,6 +322,48 @@ class CompilerOutput(BaseModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Architect API: request / response models (M2)
+# ---------------------------------------------------------------------------
+
+
+# `ContractMeta` is the historical name used in API code; keep both names
+# pointing at the same model so existing imports keep working.
+ContractMeta = Meta
+
+
+class CreateSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1)
+
+
+class CreateSessionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str
+    contract: Contract
+
+
+class GetSessionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    contract: Contract
+
+
+class RefineRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answers: list[Decision]
+
+
+class RefineResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    contract: Contract
+    diff: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     "Assumption",
     "ActualInterface",
@@ -337,6 +379,7 @@ __all__ = [
     "FailureType",
     "Decision",
     "Meta",
+    "ContractMeta",
     "ContractStatus",
     "IntentReconstruction",
     "PromptHistoryEntry",
@@ -347,4 +390,9 @@ __all__ = [
     "VerificationLogEntry",
     "Contract",
     "CompilerOutput",
+    "CreateSessionRequest",
+    "CreateSessionResponse",
+    "GetSessionResponse",
+    "RefineRequest",
+    "RefineResponse",
 ]

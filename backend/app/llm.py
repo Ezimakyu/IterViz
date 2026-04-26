@@ -32,11 +32,13 @@ log = get_logger(__name__)
 PROMPT_PATH = Path(__file__).parent / "prompts" / "compiler.md"
 
 DEFAULT_MODELS = {
-    # gpt-4o-mini hallucinates edge connectivity on the M1 seeds (precision
-    # ~56-62%); gpt-4o reaches the SPEC targets of recall >= 80% / precision
-    # >= 90%. Override via GLASSHOUSE_COMPILER_MODEL when tuning.
+    # M1 eval results on the 8-contract seed set:
+    #   gpt-4o-mini           recall 72.73% / precision 61.54%  (FAILS targets)
+    #   gpt-4o                recall 100%   / precision 91.67%  (meets targets)
+    #   claude-opus-4-5       recall 100%   / precision 100%    (demo model)
+    # Override via GLASSHOUSE_COMPILER_MODEL when tuning.
     "openai": "gpt-4o",
-    "anthropic": "claude-3-5-sonnet-latest",
+    "anthropic": "claude-opus-4-5",
 }
 
 

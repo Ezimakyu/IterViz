@@ -40,21 +40,42 @@ different output), emit one violation with:
 
 Cosmetic differences in wording do not count. Different *meaning* counts.
 
+**What is NOT an intent_mismatch:** structural defects in a graph whose
+*purpose* still matches the stated intent. If the graph implements the
+right system but has a bug (e.g. a cyclic data dependency, a missing
+failure handler, a misnamed but obvious node), do **not** call that an
+intent mismatch. Those defects belong in Pass 2 or Pass 3. Reserve
+`intent_mismatch` for cases where, if the contract were implemented
+exactly as drawn, the user would say "this is the wrong product."
+
 ### Pass 2 — Invariant checks (`type: invariant`)
 
 Apply each invariant below. Each violation gets `type: "invariant"`. The
-`severity` is whichever the invariant declares (default `error`).
+`severity` is whichever the invariant declares (default `error`). Always
+write the rule id (e.g. `INV-001`) inside the violation's `message`.
+
+**Connectivity verification — read this carefully.** Many false positives
+come from claiming a node has no edges when it actually does. Before
+emitting any violation that depends on edge connectivity (INV-001, INV-002,
+INV-003, INV-006), scan the entire `edges[]` array and count occurrences of
+`source == node.id` or `target == node.id`. Do this for every candidate
+node. If the count is > 0, the node is connected — do not flag it.
 
 - **INV-001 orphaned_node** *(error)* — every node must have at least one
-  incoming or outgoing edge, *unless* it has `is_terminal: true` or kind
-  `external` (sources/sinks may legitimately be unconnected on one side).
+  incoming or outgoing edge. **Always exempt**: any node with `kind: external`
+  (those are the outside world; their inbound/outbound side outside our
+  graph is by definition unmodeled), or any node with `is_terminal: true`.
   `affects: [node.id]`.
 - **INV-002 unconsumed_output** *(error)* — every outgoing edge of a node
   must terminate at another node defined in `nodes[]`, or at a node of kind
   `external`. `affects: [edge.id]`.
 - **INV-003 user_input_terminates** *(error)* — every node of `kind: ui`
-  must reach (transitively, via any edges) at least one node of `kind:
-  store` or `kind: external`. `affects: [ui_node.id]`.
+  must reach (**transitively**, via any chain of directed edges of any
+  kind) at least one node of `kind: store` or `kind: external`. To check:
+  starting from the ui node, follow every outgoing edge, then every
+  outgoing edge of those targets, etc., collecting the reachable node set.
+  Only flag when no node in the reachable set has `kind: store` or
+  `kind: external`. `affects: [ui_node.id]`.
 - **INV-004 missing_payload_schema** *(error)* — every edge of `kind: data`
   must have a non-null `payload_schema`. `affects: [edge.id]`.
 - **INV-005 low_confidence_unflagged** *(warning)* — any node OR edge with
@@ -74,8 +95,18 @@ would resolve it. Use the user's own vocabulary from the contract.
 
 ### Pass 3 — Failure-scenario rollouts (`type: failure_scenario`)
 
-For every edge whose source OR target has `kind: external`, enumerate
-plausible failure modes from this fixed taxonomy:
+**Trust-boundary check — required.** An edge crosses a trust boundary
+ONLY if you can find at least one node in `nodes[]` that satisfies:
+
+- `node.id == edge.source` AND `node.kind == "external"`, OR
+- `node.id == edge.target` AND `node.kind == "external"`.
+
+Internal-to-internal edges (service↔service, service↔store, service↔ui,
+etc.) do **not** cross a trust boundary. **Never emit a `failure_scenario`
+violation on a non-trust-boundary edge.** Skip them silently in Pass 3.
+
+For every edge that *does* cross a trust boundary, enumerate plausible
+failure modes from this fixed taxonomy:
 
 `timeout`, `auth_failure`, `rate_limit`, `partial_data`, `schema_drift`,
 `unavailable`.
@@ -214,6 +245,24 @@ Output:
 
 - Do not include any keys other than `verdict`, `violations`, `questions`,
   `intent_guess`.
+- Every violation MUST include all four fields: `type`, `severity`,
+  `message` (a non-empty natural-language string), and `affects` (use `[]`
+  for graph-wide findings like intent mismatches). `suggested_question` is
+  also required and may not be null.
 - Every violation must reference real `affects` IDs that appear in the
   contract.
 - Be terse. The user is reading these in a side panel under time pressure.
+
+## Final self-check before emitting
+
+Before returning, walk your `violations[]` once more and ask:
+
+1. For every INV-001 you emitted: re-scan `edges[]`. Does ANY edge have
+   `source` or `target` equal to the affected node id? If yes, **delete
+   the violation** — it is a false positive.
+2. For every `failure_scenario` violation: confirm at least one endpoint
+   of the affected edge has `kind == "external"`. If neither does, **delete
+   the violation**.
+3. For every violation: confirm `message` is a non-empty string and the
+   referenced ids exist in the contract.
+4. Cap `questions` at 5, ranked per the priority list above.

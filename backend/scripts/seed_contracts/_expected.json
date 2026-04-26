@@ -1,5 +1,5 @@
 {
-  "_doc": "Expected violations per seed contract. A compiler violation matches an expected entry when its `type` equals (or is in `accept_types`) AND its `affects` overlaps `affects` (empty `affects` matches anything).",
+  "_doc": "Expected violations per seed contract. A compiler violation matches an expected entry when (a) `emitted.type` is in `accept_types` (defaults to [type]); (b) if `rule_substr` is set, it appears (case-insensitive) in `emitted.message`; (c) if `affects` is non-empty, `emitted.affects` overlaps it (or `rule_substr` already matched).",
 
   "valid_simple.json": {
     "verdict": "pass",
@@ -9,49 +9,53 @@
   "orphaned_node.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "invariant", "affects": ["n-orphan-logger"], "rule": "INV-001"}
+      {"type": "invariant", "affects": ["n-orphan-logger"], "rule_substr": "INV-001"}
     ]
   },
 
   "missing_payload.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "invariant", "affects": ["e-reader-pg"], "rule": "INV-004"}
+      {"type": "invariant", "affects": ["e-reader-pg"], "rule_substr": "INV-004"}
     ]
   },
 
   "silent_db_choice.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "provenance", "affects": ["n-store"], "accept_types": ["provenance", "invariant"], "rule": "decided_by=agent on load-bearing kind"}
+      {"type": "provenance", "affects": ["n-store"]},
+      {"type": "provenance", "accept_types": ["provenance", "invariant"], "affects": ["n-store"]}
     ]
   },
 
   "unhandled_failure.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "failure_scenario", "affects": ["e-slack-reader"], "rule": "trust-boundary edge with no failure handler"}
+      {"type": "failure_scenario", "affects": ["e-slack-reader"]}
     ]
   },
 
   "intent_mismatch.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "intent_mismatch", "affects": [], "rule": "stated_intent disagrees with reconstructed intent"}
+      {"type": "intent_mismatch"},
+      {"type": "provenance", "affects": ["n-form"]},
+      {"type": "provenance", "affects": ["n-router"]},
+      {"type": "provenance", "affects": ["n-pg"]}
     ]
   },
 
   "low_confidence_no_question.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "invariant", "affects": ["n-warehouse"], "rule": "INV-005"}
+      {"type": "invariant", "affects": ["n-warehouse"], "rule_substr": "INV-005"}
     ]
   },
 
   "cycle_in_data_edges.json": {
     "verdict": "fail",
     "expected": [
-      {"type": "invariant", "affects": ["n-a", "n-b"], "rule": "INV-006"}
+      {"type": "invariant", "affects": ["n-a", "n-b"], "rule_substr": "INV-006"}
     ]
   }
 }

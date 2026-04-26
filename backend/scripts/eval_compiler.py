@@ -72,12 +72,26 @@ class ContractResult:
 def _violation_matches(emitted: dict[str, Any], expected: dict[str, Any]) -> bool:
     """Return True iff `emitted` satisfies `expected`.
 
-    `expected` may set `accept_types` (list of allowed types) — defaults to
-    `[expected["type"]]`.
+    Optional fields on `expected`:
+    - `accept_types`: list of allowed `type` values (defaults to `[type]`).
+    - `rule_substr`: case-insensitive substring that must appear in
+      `emitted.message`. When set, a positive substring match also satisfies
+      the affects requirement (since some LLMs report fine-grained affects
+      ids like `node.assumptions[0]` instead of the parent node id).
+    - `affects`: list of allowed affect ids; `emitted.affects` must overlap
+      it, unless rule_substr already matched or `affects` is empty.
     """
     accept_types = expected.get("accept_types") or [expected["type"]]
     if emitted.get("type") not in accept_types:
         return False
+
+    rule_substr: Optional[str] = expected.get("rule_substr")
+    if rule_substr:
+        message = (emitted.get("message") or "").lower()
+        if rule_substr.lower() not in message:
+            return False
+        return True
+
     expected_affects = set(expected.get("affects") or [])
     if not expected_affects:
         return True  # empty expected.affects = match by type alone

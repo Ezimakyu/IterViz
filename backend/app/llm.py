@@ -32,7 +32,10 @@ log = get_logger(__name__)
 PROMPT_PATH = Path(__file__).parent / "prompts" / "compiler.md"
 
 DEFAULT_MODELS = {
-    "openai": "gpt-4o-mini",
+    # gpt-4o-mini hallucinates edge connectivity on the M1 seeds (precision
+    # ~56-62%); gpt-4o reaches the SPEC targets of recall >= 80% / precision
+    # >= 90%. Override via GLASSHOUSE_COMPILER_MODEL when tuning.
+    "openai": "gpt-4o",
     "anthropic": "claude-3-5-sonnet-latest",
 }
 

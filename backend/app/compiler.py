@@ -725,6 +725,41 @@ def verify_contract(
     failure_violations = _failure_scenario_violations(contract)
     provenance_violations = _provenance_violations(contract)
 
+    # Drop any violation whose suggested_question has already been answered
+    # in a previous pass — once the user has spoken on a topic the Compiler
+    # should not keep nagging.
+    answered_questions = {d.question for d in contract.decisions if d.question}
+    answered_affects = {
+        target
+        for d in contract.decisions
+        for target in (d.affects or [])
+    }
+
+    def _already_answered(v: Violation) -> bool:
+        if v.suggested_question and v.suggested_question in answered_questions:
+            return True
+        # Provenance / invariant questions tied to a specific node/edge that
+        # the user has explicitly weighed in on are also considered answered.
+        if (
+            _enum_value(v.type) in (
+                ViolationType.PROVENANCE.value,
+                ViolationType.INVARIANT.value,
+            )
+            and v.affects
+            and answered_affects
+            and all(a in answered_affects for a in v.affects)
+        ):
+            # Only suppress provenance once the affected node/edge is now
+            # decided_by user/prompt — INV-001..006 are structural and must
+            # remain visible until they're actually fixed.
+            if _enum_value(v.type) == ViolationType.PROVENANCE.value:
+                return True
+        return False
+
+    invariant_violations = [v for v in invariant_violations if not _already_answered(v)]
+    failure_violations = [v for v in failure_violations if not _already_answered(v)]
+    provenance_violations = [v for v in provenance_violations if not _already_answered(v)]
+
     # Local intent guess as a deterministic fallback (in case the LLM is off).
     intent_guess = _heuristic_intent_guess(contract)
     confidence_updates: list[NodeConfidenceUpdate] = []

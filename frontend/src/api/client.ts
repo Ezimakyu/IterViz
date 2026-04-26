@@ -7,12 +7,18 @@
  */
 
 import type {
+  Agent,
   Assumption,
   CompilerResponse,
   Contract,
   ContractDiff,
   ContractNode,
   Decision,
+  FreezeResponse,
+  ImplementMode,
+  ImplementResponse,
+  ListAgentsResponse,
+  RegisterAgentResponse,
 } from "../types/contract";
 
 const API_BASE = (
@@ -139,6 +145,41 @@ export function updateNode(
   );
 }
 
+// ---------------------------------------------------------------------------
+// M5: Phase 2 endpoints
+// ---------------------------------------------------------------------------
+
+export function freezeContract(sessionId: string) {
+  return request<FreezeResponse>(`/sessions/${sessionId}/freeze`, {
+    method: "POST",
+  });
+}
+
+export function startImplementation(
+  sessionId: string,
+  mode: ImplementMode = "internal",
+) {
+  return request<ImplementResponse>(`/sessions/${sessionId}/implement`, {
+    method: "POST",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function registerAgent(name: string, type: Agent["type"] = "custom") {
+  return request<RegisterAgentResponse>(`/agents`, {
+    method: "POST",
+    body: JSON.stringify({ name, type }),
+  });
+}
+
+export function listAgents() {
+  return request<ListAgentsResponse>(`/agents`, { method: "GET" });
+}
+
+export function downloadGenerated(sessionId: string) {
+  return `${API_BASE}/sessions/${sessionId}/generated`;
+}
+
 export const API = {
   createSession,
   getSession,
@@ -146,4 +187,9 @@ export const API = {
   submitAnswers,
   refineContract,
   updateNode,
+  freezeContract,
+  startImplementation,
+  registerAgent,
+  listAgents,
+  downloadGenerated,
 };

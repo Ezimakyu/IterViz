@@ -1,82 +1,99 @@
 # 1. Overview
 
-IterViz is a real-time visualization layer for *iterative processes* — any program that produces a stream of metrics one step at a time. Common examples include machine-learning training loops, numerical optimization solvers, simulations, and data pipelines, but IterViz makes no domain-specific assumptions: the unit of observation is a generic **Run**.
+IterViz is a visual AI agent orchestrator for software architecture planning. It transforms natural language prompts into verified system designs represented as interactive graphs, then coordinates multiple agents to implement each component while providing real-time progress visualization.
 
 This page summarizes the system at a glance. Each subsystem is described in more detail in pages 2.x; the implementation roadmap is in [1.2](01-2-repository-status-and-roadmap.md).
 
 ---
 
-## 1.1 What IterViz is
+## 1.1 What IterViz Is
 
-* A **Python SDK** (`iterviz-client`) that user code imports to log per-iteration metrics.
-* A **Python backend** (`iterviz-server`) that collects metrics, stores them in memory, and serves a dashboard.
-* A **TypeScript frontend** (`iterviz-ui`) served by the backend, that renders charts live as data arrives.
+* A **Python backend** (`backend/`) that hosts the Architect agent, Verifier, and multi-agent Orchestrator.
+* A **TypeScript frontend** (`frontend/`) that renders interactive system graphs with React Flow and provides real-time progress updates.
+* A **developer-in-the-loop verification** system that ensures AI-generated architectures meet consistency and completeness requirements before implementation begins.
 
-A typical user adds three lines to an existing loop and gets a live dashboard at `http://localhost:8765` for free, with no configuration.
+A typical workflow: enter a prompt like *"Build a Slack bot that summarizes unread DMs daily"*, watch the Architect generate a system graph, answer clarifying questions from the Verifier, then watch multiple agents implement each node in parallel.
 
 ---
 
-## 1.2 Conceptual workflow
+## 1.2 Conceptual Workflow
 
 ```mermaid
 flowchart LR
-    Loop["User loop<br/>(any iterative process)"] -->|"with iterviz.run('exp') as viz"| Run["Run<br/>(uuid, name, status, metadata)"]
-    Run -->|"viz.log(payload)"| Client["iterviz-client<br/>(Python SDK)"]
-    Client -->|"JSON over WebSocket"| Server["iterviz-server<br/>(collector + store)"]
-    Server -->|"REST /api/runs<br/>WS /ws/metrics"| UI["iterviz-ui<br/>(browser dashboard)"]
+    Prompt["Natural Language\nPrompt"] --> Architect["Architect Agent"]
+    Architect --> Contract["System Contract\n(Graph)"]
+    Contract --> Verifier["Verifier"]
+    Verifier -->|Questions| Developer["Developer"]
+    Developer -->|Answers| Architect
+    Verifier -->|Passes| Freeze["Freeze Contract"]
+    Freeze --> Orchestrator["Orchestrator"]
+    Orchestrator --> Agents["Implementation\nAgents"]
+    Agents --> Code["Generated Code"]
 ```
 
-Every observed program is wrapped (explicitly via context manager / decorator, or implicitly via `init()`/`finalize()`) into a single **Run**. Runs are independent units that the UI can list, overlay, and compare.
+The system operates in two phases:
+
+**Phase 1 — Planning Loop:** The Architect generates a contract (graph), the Verifier checks it for issues, the developer answers questions, and the cycle repeats until the contract passes verification.
+
+**Phase 2 — Implementation:** The verified contract is frozen, the Orchestrator assigns nodes to agents, and agents implement components in parallel while the UI shows real-time progress.
 
 ---
 
-## 1.3 System data flow
+## 1.3 System Data Flow
 
 ```mermaid
 flowchart LR
-    A["Iterative process"] --> B["iterviz-client SDK"]
-    B -->|JSON| C["WebSocket transport"]
-    C --> D["iterviz-server collector"]
-    D --> E["TimeSeriesStore<br/>(indexed by run_id)"]
-    E --> F["REST + WS API"]
-    F --> G["iterviz-ui (browser)"]
+    A["Developer Prompt"] --> B["Architect Agent"]
+    B --> C["Contract Store\n(SQLite)"]
+    C --> D["Verifier"]
+    D --> E["REST + WS API"]
+    E --> F["React Flow UI"]
+    F -->|Answers| E
+    E -->|Refined Contract| B
 ```
 
-Phase 1 uses **JSON exclusively** as the wire format; Protobuf is explicitly out of scope. Transport is **WebSocket only** in Phase 1; JSONL file transport is planned for Phase 2b.
+All communication uses **JSON over REST and WebSocket**. The frontend connects via WebSocket to receive real-time updates as nodes transition through implementation states.
 
 ---
 
-## 1.4 Component status
+## 1.4 Component Status
 
-| Package | Language | Status | Phase introduced |
-|---|---|---|---|
-| `iterviz-client` | Python | Planned | Phase 1a |
-| `iterviz-server` | Python | Planned | Phase 1a |
-| `iterviz-ui` | TypeScript | Planned | Phase 1b |
-| `iterviz-config` (YAML/dict layer) | Python | Planned | Phase 2a |
-| `iterviz-store-sqlite` | Python | Planned | Phase 2b |
-
-All components live in a single monorepo under `packages/`. See [1.2](01-2-repository-status-and-roadmap.md) for the directory layout.
+| Component | Language | Status | Description |
+|-----------|----------|--------|-------------|
+| `backend/app/architect.py` | Python | Implemented | Generates contracts from prompts |
+| `backend/app/compiler.py` | Python | Implemented | Verifies contracts, emits violations |
+| `backend/app/orchestrator.py` | Python | Implemented | Coordinates multi-agent implementation |
+| `backend/app/ws.py` | Python | Implemented | WebSocket for live updates |
+| `frontend/src/components/Graph.tsx` | TypeScript | Implemented | React Flow graph renderer |
+| `frontend/src/components/NodeCard.tsx` | TypeScript | Implemented | Custom node visualization |
+| Implementation Subgraphs | Both | In Progress | Detailed task breakdown per node |
 
 ---
 
-## 1.5 Roadmap at a glance
+## 1.5 Roadmap at a Glance
 
 ```mermaid
 flowchart LR
-    P0[Phase 0<br/>Scaffolding] --> P1a[Phase 1a<br/>Client + Server MVP]
-    P1a --> P1b[Phase 1b<br/>Minimal Frontend]
-    P1b --> P2a[Phase 2a<br/>Config & Transforms]
-    P2a --> P2b[Phase 2b<br/>Persistence & Runs]
-    P2b --> P3[Phase 3<br/>Polish & Publish]
+    M0[M0: Static Mockup] --> M3[M3: Phase 1 Loop]
+    M1[M1: Compiler Harness] --> M3
+    M2[M2: Architect + I/O] --> M3
+    M3 --> M4[M4: Editable Graph]
+    M3 --> M5[M5: Phase 2 Orchestrator]
+    M4 --> M6[M6: Subgraphs + Polish]
+    M5 --> M6
 ```
 
-Six phases replace the original three-phase plan. Full details in [1.2](01-2-repository-status-and-roadmap.md).
+| Milestone | Status |
+|-----------|--------|
+| M0-M5 | Complete |
+| M6 (Implementation Subgraphs) | In Progress |
+
+Full details in [1.2](01-2-repository-status-and-roadmap.md) and [TODO.md](../TODO.md).
 
 ---
 
-## 1.6 Where to go next
+## 1.6 Where to Go Next
 
-* If you want to **use** IterViz: see [3.2 Usage Examples & Integration Guide](03-2-usage-examples-and-integration-guide.md).
-* If you want to **understand** IterViz: see [2 Architecture](02-architecture.md).
-* If you want to **contribute** to IterViz: see [4 Contributing](04-contributing.md) and [4.1 Development Environment Setup](04-1-development-environment-setup.md).
+* If you want to **use** IterViz: see the [Quick Start](../README.md#quick-start) in the README.
+* If you want to **understand** the architecture: see [2 Architecture](02-architecture.md).
+* If you want to **configure** the system: see [3 Configuration](03-configuration.md).

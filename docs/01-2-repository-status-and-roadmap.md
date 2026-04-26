@@ -1,117 +1,225 @@
 # 1.2 Repository Status & Roadmap
 
-> **Current status:** Planning / bootstrapping. The repository contains a `README.md` and this design-doc set under `docs/`. No source code has been committed yet.
+> **Current status:** Active development. Phase 1 (planning loop) and Phase 2 (multi-agent implementation) are complete. M6 (implementation subgraphs) is in progress.
 
-This page describes the target monorepo layout and the six-phase roadmap.
+This page describes the actual repository layout and milestone roadmap.
 
 ---
 
-## 1.2.1 Target directory structure
+## 1.2.1 Directory Structure
 
 ```
 IterViz/
 ├── README.md
-├── Makefile                    # or justfile — coordinates cross-package builds
-├── packages/
-│   ├── iterviz-client/
-│   │   ├── pyproject.toml
-│   │   ├── iterviz_client/
-│   │   └── tests/
-│   ├── iterviz-server/
-│   │   ├── pyproject.toml
-│   │   ├── iterviz_server/
-│   │   └── tests/
-│   └── iterviz-ui/
-│       ├── package.json
-│       ├── src/
-│       └── tests/
-└── tests/
-    └── integration/            # cross-package end-to-end tests
+├── TODO.md                     # Detailed milestone breakdown
+├── SPEC.md                     # Product specification
+├── ARCHITECTURE.md             # System architecture
+├── backend/                    # FastAPI Python backend
+│   ├── pyproject.toml
+│   ├── requirements.txt
+│   ├── app/
+│   │   ├── api.py              # REST endpoints
+│   │   ├── ws.py               # WebSocket for live updates
+│   │   ├── architect.py        # Architect agent
+│   │   ├── compiler.py         # Verifier
+│   │   ├── orchestrator.py     # Phase 2 coordinator
+│   │   ├── agents.py           # External agent registry
+│   │   ├── assignments.py      # Node assignment tracking
+│   │   ├── contract.py         # Contract persistence
+│   │   ├── schemas.py          # Pydantic models
+│   │   ├── llm.py              # LLM wrapper (OpenAI/Anthropic)
+│   │   ├── logger.py           # Structured logging
+│   │   └── prompts/            # LLM system prompts
+│   ├── scripts/
+│   │   ├── eval_compiler.py    # Verification harness
+│   │   └── seed_contracts/     # Test fixtures
+│   └── tests/                  # pytest suite
+├── frontend/                   # React + Vite + TypeScript
+│   ├── package.json
+│   └── src/
+│       ├── components/
+│       │   ├── Graph.tsx       # React Flow renderer
+│       │   ├── NodeCard.tsx    # Custom node component
+│       │   ├── EdgeLabel.tsx   # Edge visualization
+│       │   ├── QuestionPanel.tsx
+│       │   ├── ControlBar.tsx
+│       │   ├── PromptInput.tsx
+│       │   └── AgentPanel.tsx
+│       ├── state/
+│       │   ├── contract.ts     # Zustand store
+│       │   └── websocket.ts    # WS connection
+│       ├── api/
+│       │   └── client.ts       # Backend API wrapper
+│       └── types/
+│           └── contract.ts     # TypeScript types
+├── docs/                       # Documentation
+└── scripts/
+    └── parallel-dev/           # Multi-agent development workflow
 ```
-
-* Three independently-versioned packages live under `packages/`. There is **no** single top-level Python package and **no** `setup.py`; each Python package owns its own `pyproject.toml`.
-* `iterviz-client` (the SDK) optionally depends on `iterviz-server` so that `iterviz.init()` can auto-spawn a local server subprocess. If the server package isn't installed, the client falls back to remote-only mode (the user must pass `server_url`).
-* `iterviz-server` bundles the built `iterviz-ui` static assets so the user only ever installs Python packages.
-* Cross-package end-to-end tests live in the top-level `tests/integration/` directory.
-
-The legacy `src/iterviz_collector/` and `src/iterviz_frontend/` layout from earlier drafts has been **removed** in favor of this monorepo structure.
 
 ---
 
 ## 1.2.2 Component Interaction Map
 
 ```mermaid
-flowchart LR
-    UserCode["User Code"] --> Client["iterviz-client<br/>(Python SDK)"]
-    Client -->|"JSON over WS"| Server["iterviz-server<br/>(Python backend)"]
-    Server -->|"static assets"| UI["iterviz-ui<br/>(TypeScript SPA)"]
-    Server -->|"REST + WS"| UI
-    Client -. "auto-spawn subprocess" .-> Server
+flowchart TB
+    subgraph Frontend
+        UI["React Flow UI"]
+        Store["Zustand Store"]
+        WS["WebSocket Client"]
+    end
+    
+    subgraph Backend
+        API["FastAPI REST"]
+        WSS["WebSocket Server"]
+        Arch["Architect Agent"]
+        Ver["Verifier"]
+        Orch["Orchestrator"]
+        DB["SQLite"]
+    end
+    
+    subgraph LLM
+        OpenAI["OpenAI API"]
+        Anthropic["Anthropic API"]
+    end
+    
+    UI --> Store
+    Store --> API
+    Store --> WS
+    WS --> WSS
+    API --> Arch
+    API --> Ver
+    API --> Orch
+    Arch --> DB
+    Ver --> DB
+    Orch --> DB
+    Arch --> OpenAI
+    Arch --> Anthropic
+    Ver --> OpenAI
+    Ver --> Anthropic
+    WSS --> Store
 ```
 
-Notes:
+---
 
-* The wire format is JSON only. Protobuf has been removed from the Phase 1 plan.
-* The client→server hop is always a WebSocket in Phase 1.
-* Client→server auto-spawn is only available when both packages are installed in the same environment.
+## 1.2.3 Milestone Roadmap
+
+The project is organized into milestones (M0-M6) that can be developed in parallel where dependencies allow:
+
+```mermaid
+flowchart TD
+    M0[M0: Static Mockup]
+    M1[M1: Compiler Harness]
+    M2[M2: Architect + I/O]
+    M3[M3: Phase 1 Loop]
+    M4[M4: Editable Graph]
+    M5[M5: Phase 2 Orchestrator]
+    M6[M6: Subgraphs + Polish]
+
+    M0 --> M3
+    M1 --> M3
+    M2 --> M3
+    M3 --> M4
+    M3 --> M5
+    M4 --> M6
+    M5 --> M6
+```
+
+### M0 — Static React Flow Mockup (Complete)
+
+* React + Vite + TypeScript setup
+* React Flow integration with dagre layout
+* Custom `NodeCard` component with status badges
+* Sample contracts for testing layout
+
+### M1 — Compiler Tuning Harness (Complete)
+
+* Pydantic schemas for Contract, Node, Edge, Violation
+* LLM wrapper with `instructor` for structured output
+* 8 seed contracts with expected violations
+* Evaluation harness with recall/precision metrics
+* Supports both OpenAI and Anthropic
+
+### M2 — Architect Agent + Contract I/O (Complete)
+
+* Architect agent generates contracts from prompts
+* SQLite persistence for sessions and contracts
+* FastAPI endpoints for session management
+* Contract versioning and history
+
+### M3 — Phase 1 Loop End-to-End (Complete)
+
+* Full Architect → Verifier → Q&A → Refine loop
+* Frontend wired to live backend
+* Question panel with affected node highlighting
+* Visual diff showing contract changes
+* Loop converges in 2-3 iterations
+
+### M4 — Editable Graph + Decision Provenance (Complete)
+
+* Inline editing of node fields
+* `decided_by: user` provenance tracking
+* UVDC (User-Visible Decision Coverage) calculation
+* Verifier respects user decisions
+
+### M5 — Phase 2 Orchestrator (Complete)
+
+* Contract freezing with hash verification
+* Multi-agent implementation coordination
+* Internal mode (LLM subagents) and external mode (API)
+* WebSocket broadcasts for status updates
+* Agent registration and assignment tracking
+* Generated code download
+
+### M6 — Implementation Subgraphs + Polish (In Progress)
+
+* Implementation subgraph generation per node
+* Subgraph visualization with React Flow
+* Real-time subgraph progress updates
+* Draggable detail popups
+* Error handling and loading states
+* Demo replay mode
 
 ---
 
-## 1.2.3 Six-phase roadmap
+## 1.2.4 Development Setup
 
-The original three-phase plan has been replaced with a more granular six-phase roadmap:
+See [README.md](../README.md#quick-start) for installation and running instructions.
 
-### Phase 0 — Scaffolding
+**Prerequisites:**
+- Python 3.10+
+- Node.js 18+
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
-* Monorepo layout under `packages/`.
-* CI via GitHub Actions: lint, type-check, test on every PR.
-* Static analysis baseline: `ruff` (linting), `mypy` (type checking).
-* Framework selection from the recommendation tables in [2.3](02-3-rendering-engine-and-frontend-ui.md). No code yet — just decisions and skeleton `pyproject.toml` / `package.json` files.
+**Backend:**
+```bash
+cd backend
+pip install -r requirements.txt
+DEBUG=1 uvicorn app.main:app --reload
+```
 
-### Phase 1a — Client + Server MVP
+**Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-* `iterviz.init()` / `viz.log()` / `viz.finalize()` procedural API.
-* `with iterviz.run("name") as viz:` context manager.
-* WebSocket JSON transport.
-* In-memory ring buffer keyed by `run_id`.
-* `Run` dataclass (`run_id`, `name`, `created_at`, `status`, `metadata`).
-* REST endpoints `/api/runs` and `/api/metrics`.
-* Marker logging (5 lines per session).
-* Fire-and-forget exception handling at every transport boundary.
-
-### Phase 1b — Minimal Frontend
-
-* `iterviz-ui` SPA, built and served by `iterviz-server`.
-* Auto-detected line charts from scalar payloads.
-* Live updates via WebSocket subscription.
-* Run name displayed in the dashboard header.
-* Responsive auto-grid layout.
-
-### Phase 2a — Configuration & Transforms
-
-* YAML / dict opt-in configuration.
-* Moving averages, LTTB downsampling, normalization transforms.
-* Multi-metric dashboards, explicit grid layout config.
-
-### Phase 2b — Persistence & Runs
-
-* SQLite storage backend (replacing or supplementing the in-memory ring buffer).
-* Run listing, comparison, and overlay in the UI.
-* JSONL file transport for offline / batch ingestion.
-
-### Phase 3 — Polish & Publish
-
-* Histogram and scatter chart types.
-* PyPI publication for `iterviz-client` and `iterviz-server`.
-* Hosted documentation site.
-* Visual regression test suite for the frontend.
+**Testing:**
+```bash
+cd backend
+pytest tests/ -v
+pytest tests/ --cov=app --cov-report=term-missing
+```
 
 ---
 
-## 1.2.4 Guidance for Contributors
+## 1.2.5 Environment Variables
 
-* The repo uses **per-package `pyproject.toml` files**, not a top-level `setup.py`. Don't create a `setup.py` — it will be rejected at review.
-* Run code lives in `packages/<pkg>/<pkg_module>/`; tests live next to it in `packages/<pkg>/tests/`. Cross-package integration tests go in the top-level `tests/integration/`.
-* Lint with `ruff` and type-check with `mypy` before pushing. Both are wired into CI; failing either will block the PR.
-* When adding a new metric type or chart, do so in the appropriate package — collectors and stores in `iterviz-server`, chart components in `iterviz-ui`. Never bypass the layered structure by, e.g., putting rendering logic in the SDK.
-* See [4.1 Development Environment Setup](04-1-development-environment-setup.md) for `Makefile` targets (`make build-ui`, `make dev-server`, `make test-all`, `make lint`, `make typecheck`).
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key | — |
+| `OPENAI_API_KEY` | OpenAI API key | — |
+| `GLASSHOUSE_LLM_PROVIDER` | Force `openai` or `anthropic` | Auto-detect |
+| `GLASSHOUSE_COMPILER_MODEL` | Override model | `claude-opus-4-5` |
+| `DEBUG` | Enable verbose logging | `0` |

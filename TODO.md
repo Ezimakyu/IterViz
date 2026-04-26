@@ -16,7 +16,7 @@ See [SPEC.md](SPEC.md) for product requirements and [ARCHITECTURE.md](ARCHITECTU
 | M3 | Phase 1 loop end-to-end | Demo prompt converges in ≤3 iterations | High |
 | M4 | Editable graph + decision provenance | User edits flow back with `decided_by: user` | Medium |
 | M5 | Phase 2 orchestrator (slim) | 2-3 generated files match frozen contract | High |
-| M6 | Polish + stretch | 3-minute demo runs end-to-end | Low |
+| M6 | Implementation subgraphs + polish | Live subgraph progress visualization; 3-minute demo | Medium |
 
 ---
 
@@ -551,7 +551,50 @@ See [SPEC.md](SPEC.md) for product requirements and [ARCHITECTURE.md](ARCHITECTU
 
 ## M6 — Polish + Stretch
 
-**Goal**: Demo-ready polish. Stretch goals if time permits.
+**Goal**: Demo-ready polish, including Implementation Subgraphs for live progress visualization. Stretch goals if time permits.
+
+### Implementation Subgraphs (core feature)
+
+When parallel agents implement nodes from the big picture graph, generate **implementation subgraphs** that show a detailed breakdown of implementation tasks. See [docs/02-4-implementation-subgraphs.md](docs/02-4-implementation-subgraphs.md) for full specification.
+
+**Backend:**
+- [ ] Create `app/subgraph.py` — Subgraph generation using LLM planner (no verification loop needed; parent node is verified)
+- [ ] Create `app/subgraphs.py` — In-memory storage for subgraphs
+- [ ] Create `app/prompts/planner.md` — System prompt for implementation planner
+- [ ] Add subgraph models to `app/schemas.py`:
+  - `SubgraphNode` (function, test_unit, test_integration, type_def, config, error_handler, util kinds)
+  - `SubgraphEdge` (dependency relationships)
+  - `ImplementationSubgraph` (container with progress tracking)
+- [ ] Add API routes:
+  - `POST /sessions/{id}/nodes/{node_id}/subgraph` — Generate subgraph for node
+  - `GET /sessions/{id}/nodes/{node_id}/subgraph` — Get existing subgraph
+  - `GET /sessions/{id}/subgraphs` — Get all subgraphs for session
+  - `PATCH /sessions/{id}/nodes/{node_id}/subgraph/nodes/{sg_id}` — Update subgraph node status
+- [ ] Add WebSocket broadcasts: `subgraph_created`, `subgraph_node_status_changed`
+- [ ] Integrate with `orchestrator.py` to generate subgraphs when implementation starts
+
+**Frontend:**
+- [ ] Create `src/types/subgraph.ts` — TypeScript types
+- [ ] Create `src/state/subgraph.ts` — Zustand store for subgraph state
+- [ ] Create `src/components/SubgraphView.tsx` — Subgraph visualization with dagre layout
+- [ ] Create `src/components/SubgraphNodeCard.tsx` — Custom node renderer with status colors:
+  - Pending: gray fill, dashed border
+  - In progress: yellow fill, solid border, pulse animation
+  - Completed: green fill, solid border
+  - Failed: red fill, solid border
+- [ ] Create `src/components/DraggablePopup.tsx` — Draggable/movable popup component
+- [ ] Create `src/components/NodePopupManager.tsx` — Manage popup state with constraints:
+  - Allow simultaneous popups for big picture + subgraph node
+  - No two nodes from same graph can have popups open at same time
+- [ ] Update `NodeCard.tsx`:
+  - Left-click on node → enter subgraph view
+  - Top-right info button → popup showing description WITHOUT assumptions
+- [ ] Update `Graph.tsx` — Integrate subgraph navigation with back arrow
+- [ ] Update `websocket.ts` — Handle subgraph WebSocket events
+
+**Tests:**
+- [ ] Create `tests/test_subgraph.py` — Subgraph generation tests
+- [ ] Create `tests/test_subgraph_api.py` — API endpoint tests
 
 ### Core polish (required for demo)
 
@@ -608,10 +651,48 @@ Run the 3-minute demo script from [SPEC.md §7](SPEC.md):
 
 Demo runs end-to-end without intervention or errors.
 
+### Subgraph Acceptance Test
+
+| Action | Expected |
+|--------|----------|
+| Start Phase 2 implementation | Subgraphs generated for each node |
+| View implementing node | Subgraph shows with gray pending nodes |
+| Agent starts work | Current subgraph node turns yellow with pulse |
+| Agent completes task | Subgraph node turns green with solid border |
+| Click back arrow | Returns to big picture graph |
+| Click node info button | Popup shows description (no assumptions) |
+| Click subgraph node | Popup shows function explanation |
+| Open two popups | Both visible and draggable |
+| Open two nodes from same graph | First popup closes automatically |
+
 ### Deliverables
 
-- Updated UI with error handling, loading states, UVDC display.
-- `--replay` mode in `backend/app/main.py`.
+**Backend:**
+- `backend/app/subgraph.py` — Subgraph generation module
+- `backend/app/subgraphs.py` — Subgraph storage
+- `backend/app/prompts/planner.md` — Implementation planner prompt
+- Updated `backend/app/schemas.py` — Subgraph models
+- Updated `backend/app/api.py` — Subgraph endpoints
+- Updated `backend/app/ws.py` — Subgraph broadcasts
+- Updated `backend/app/orchestrator.py` — Subgraph integration
+- `backend/tests/test_subgraph.py`
+- `backend/tests/test_subgraph_api.py`
+
+**Frontend:**
+- `frontend/src/types/subgraph.ts` — TypeScript types
+- `frontend/src/state/subgraph.ts` — Zustand store
+- `frontend/src/components/SubgraphView.tsx` — Subgraph visualization
+- `frontend/src/components/SubgraphNodeCard.tsx` — Subgraph node renderer
+- `frontend/src/components/DraggablePopup.tsx` — Draggable popups
+- `frontend/src/components/NodePopupManager.tsx` — Popup state management
+- Updated `frontend/src/components/Graph.tsx` — Subgraph navigation
+- Updated `frontend/src/components/NodeCard.tsx` — Click handlers
+- Updated `frontend/src/state/websocket.ts` — Subgraph events
+- Updated `frontend/src/api/client.ts` — Subgraph API calls
+
+**Polish:**
+- Updated UI with error handling, loading states, UVDC display
+- `--replay` mode in `backend/app/main.py`
 - `scripts/replays/demo.json`
 - `backend/tests/test_e2e.py`
 - Updated `README.md` with test instructions
@@ -681,7 +762,7 @@ flowchart TD
   M3[M3: Phase 1 Loop]
   M4[M4: Editable Graph]
   M5[M5: Phase 2 Orchestrator]
-  M6[M6: Polish]
+  M6[M6: Subgraphs + Polish]
 
   M0 --> M3
   M1 --> M3
@@ -692,4 +773,4 @@ flowchart TD
   M5 --> M6
 ```
 
-M0, M1, and M2 can be worked in parallel. M3 depends on all three. M4 and M5 can be worked in parallel after M3. M6 is final polish.
+M0, M1, and M2 can be worked in parallel. M3 depends on all three. M4 and M5 can be worked in parallel after M3. M6 (Implementation Subgraphs + Polish) depends on M5's Phase 2 orchestrator infrastructure.

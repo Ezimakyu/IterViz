@@ -42,8 +42,19 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const { node, tier } = data;
   const confidencePct = Math.round(node.confidence * 100);
   const selectedNodeId = useContractStore((s) => s.selectedNodeId);
+  const previousContract = useContractStore((s) => s.previousContract);
   const isSpotlight = selectedNodeId === id;
   const size = TIER_SIZE[tier];
+
+  // Diff highlight: yellow ring/badge when this node changed (or is new).
+  const prev = previousContract?.nodes.find((n) => n.id === id);
+  const isNew = previousContract != null && prev == null;
+  const isChanged =
+    !isNew &&
+    prev != null &&
+    (prev.confidence !== node.confidence ||
+      prev.decided_by !== node.decided_by ||
+      prev.name !== node.name);
 
   return (
     <div
@@ -55,6 +66,7 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
         selected || isSpotlight
           ? "border-sky-500 shadow-sky-500/30"
           : "border-slate-400",
+        isNew || isChanged ? "!ring-yellow-400/80 ring-[3px]" : "",
       ].join(" ")}
       style={{ width: size.width, height: size.height }}
       data-testid={`node-card-${node.id}`}
@@ -73,6 +85,11 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
         className="!pointer-events-none !border-0 !bg-transparent !opacity-0"
       />
 
+      {isNew && (
+        <span className="absolute -top-2 right-1 rounded bg-yellow-400 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-900">
+          NEW
+        </span>
+      )}
       <div className="flex items-center justify-center">
         <h3
           className={`truncate text-center font-semibold leading-tight ${TIER_TEXT_SIZE[tier]}`}

@@ -42,8 +42,36 @@ function GraphInner({ contract }: GraphProps) {
     toggleSelectedEdge,
     clearSelection,
   } = useContractStore();
+  const previousContract = useContractStore((s) => s.previousContract);
 
   const hierarchy = useMemo(() => buildHierarchy(contract), [contract]);
+
+  // Diff bookkeeping: which nodes/edges changed since the previous contract?
+  const diff = useMemo(() => {
+    if (!previousContract) {
+      return { newNodeIds: new Set<string>(), changedNodeIds: new Set<string>() };
+    }
+    const prevById = new Map(
+      previousContract.nodes.map((n) => [n.id, n] as const),
+    );
+    const newNodeIds = new Set<string>();
+    const changedNodeIds = new Set<string>();
+    for (const n of contract.nodes) {
+      const prev = prevById.get(n.id);
+      if (!prev) {
+        newNodeIds.add(n.id);
+        continue;
+      }
+      if (
+        prev.confidence !== n.confidence ||
+        prev.decided_by !== n.decided_by ||
+        prev.name !== n.name
+      ) {
+        changedNodeIds.add(n.id);
+      }
+    }
+    return { newNodeIds, changedNodeIds };
+  }, [contract, previousContract]);
 
   // Uncontrolled React Flow: the force simulation drives node positions
   // via `useReactFlow().setNodes`, so we don't own node state here.
@@ -105,6 +133,12 @@ function GraphInner({ contract }: GraphProps) {
         />
         <Controls position="bottom-left" showInteractive={false} />
       </ReactFlow>
+
+      {(diff.newNodeIds.size > 0 || diff.changedNodeIds.size > 0) && (
+        <div className="pointer-events-none absolute right-3 top-3 rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-1 text-[11px] text-yellow-300">
+          {diff.newNodeIds.size} new · {diff.changedNodeIds.size} changed
+        </div>
+      )}
 
       {selectedNode && (
         <NodeDetailsPopup

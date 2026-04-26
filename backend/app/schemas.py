@@ -345,6 +345,116 @@ class ConfidenceReport(BaseModel):
     summary: ConfidenceSummary
 
 
+# ---------------------------------------------------------------------------
+# M5: Agent & Assignment models (for Phase 2 orchestration)
+# ---------------------------------------------------------------------------
+
+
+class AgentType(str, Enum):
+    DEVIN = "devin"
+    CURSOR = "cursor"
+    CLAUDE = "claude"
+    CUSTOM = "custom"
+    INTERNAL = "internal"  # for orchestrator-managed subagents
+
+
+class AgentStatus(str, Enum):
+    ACTIVE = "active"      # currently working on a node
+    IDLE = "idle"          # registered but not working
+    DISCONNECTED = "disconnected"  # no API calls for > 60s
+
+
+class AssignmentStatus(str, Enum):
+    PENDING = "pending"        # created, not yet claimed
+    IN_PROGRESS = "in_progress"  # claimed by an agent
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ImplementMode(str, Enum):
+    INTERNAL = "internal"
+    EXTERNAL = "external"
+
+
+class Agent(BaseModel):
+    """External agent that can claim and work on nodes."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    id: str
+    name: str
+    type: AgentType = AgentType.CUSTOM
+    registered_at: datetime
+    last_seen_at: datetime
+    status: AgentStatus = AgentStatus.IDLE
+    current_assignment: Optional[str] = None  # assignment_id
+
+
+class NeighborInterface(BaseModel):
+    """Interface info for an adjacent node."""
+
+    model_config = ConfigDict(extra="allow")
+
+    edge_id: str
+    node_id: str  # source or target depending on direction
+    node_name: str
+    payload_schema: Optional[dict[str, Any]] = None
+
+
+class AssignmentPayload(BaseModel):
+    """What an agent receives when assigned a node."""
+
+    model_config = ConfigDict(extra="allow")
+
+    contract_snapshot: Contract
+    node: Node
+    neighbor_interfaces: dict[str, list[NeighborInterface]] = Field(
+        default_factory=lambda: {"incoming": [], "outgoing": []}
+    )
+
+
+class AssignmentResult(BaseModel):
+    """What an agent submits when completing a node."""
+
+    model_config = ConfigDict(extra="allow")
+
+    implementation: Implementation
+    completed_at: datetime
+    duration_ms: int
+
+
+class Assignment(BaseModel):
+    """Work assignment for Phase 2 implementation."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    id: str
+    session_id: str
+    node_id: str
+    created_at: datetime
+    assigned_to: Optional[str] = None
+    assigned_at: Optional[datetime] = None
+    status: AssignmentStatus = AssignmentStatus.PENDING
+    payload: AssignmentPayload
+    result: Optional[AssignmentResult] = None
+
+
+class IntegrationMismatch(BaseModel):
+    """Detected mismatch between declared and actual interfaces."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    id: str
+    edge_id: str
+    source_node_id: str
+    target_node_id: str
+    declared_schema: Optional[dict[str, Any]] = None
+    actual_source_interface: Optional[ActualInterface] = None
+    actual_target_interface: Optional[ActualInterface] = None
+    mismatch_description: str
+    severity: Severity = Severity.WARNING
+
+
 class CompilerOutput(BaseModel):
     """What the Blind Compiler returns for a single run.
 
@@ -452,6 +562,198 @@ class ContractResponse(BaseModel):
     contract: Contract
 
 
+# ---------------------------------------------------------------------------
+# M5: API request / response models (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class RegisterAgentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    type: AgentType = AgentType.CUSTOM
+
+
+class RegisterAgentResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agent_id: str
+    agent: Agent
+
+
+class ListAgentsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agents: list[Agent] = Field(default_factory=list)
+
+
+class GetAssignmentResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    assignment: Optional[Assignment] = None
+
+
+class ClaimNodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+
+
+class ClaimNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+    node: Optional[Node] = None
+    assignment: Optional[Assignment] = None
+    error: Optional[str] = None
+
+
+class NodeStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    progress: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    message: Optional[str] = None
+
+
+class NodeStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+
+
+class SubmitImplementationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+    file_paths: list[str]
+    actual_interface: ActualInterface
+    notes: Optional[str] = None
+
+
+class SubmitImplementationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+    node: Optional[Node] = None
+
+
+class ReleaseNodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str
+
+
+class ReleaseNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+
+
+class FreezeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    contract: Contract
+    frozen_hash: str
+
+
+class ImplementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ImplementMode = ImplementMode.INTERNAL
+
+
+class ImplementResponse(BaseModel):
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    job_id: str
+    mode: ImplementMode
+    assignments_created: int
+
+
+class GeneratedFilesResponse(BaseModel):
+    """Metadata about generated files (actual zip sent as file response)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str
+    node_count: int
+    file_count: int
+
+
+# ---------------------------------------------------------------------------
+# M5: WebSocket message models
+# ---------------------------------------------------------------------------
+
+
+class WSMessageType(str, Enum):
+    CONTRACT_UPDATED = "contract_updated"
+    NODE_STATUS_CHANGED = "node_status_changed"
+    NODE_PROGRESS = "node_progress"
+    NODE_CLAIMED = "node_claimed"
+    AGENT_CONNECTED = "agent_connected"
+    IMPLEMENTATION_COMPLETE = "implementation_complete"
+    INTEGRATION_RESULT = "integration_result"
+    ERROR = "error"
+
+
+class WSMessage(BaseModel):
+    """Base WebSocket message."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    type: WSMessageType
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WSNodeStatusChanged(WSMessage):
+    type: WSMessageType = WSMessageType.NODE_STATUS_CHANGED
+    node_id: str
+    status: NodeStatus
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+
+
+class WSNodeProgress(WSMessage):
+    type: WSMessageType = WSMessageType.NODE_PROGRESS
+    node_id: str
+    agent_id: str
+    progress: float
+    message: Optional[str] = None
+
+
+class WSNodeClaimed(WSMessage):
+    type: WSMessageType = WSMessageType.NODE_CLAIMED
+    node_id: str
+    agent_id: str
+    agent_name: str
+
+
+class WSAgentConnected(WSMessage):
+    type: WSMessageType = WSMessageType.AGENT_CONNECTED
+    agent_id: str
+    agent_name: str
+    agent_type: Optional[AgentType] = None
+
+
+class WSImplementationComplete(WSMessage):
+    type: WSMessageType = WSMessageType.IMPLEMENTATION_COMPLETE
+    success: bool
+    nodes_implemented: int
+    nodes_failed: int
+
+
+class WSIntegrationResult(WSMessage):
+    type: WSMessageType = WSMessageType.INTEGRATION_RESULT
+    mismatches: list[IntegrationMismatch] = Field(default_factory=list)
+
+
+class WSError(WSMessage):
+    type: WSMessageType = WSMessageType.ERROR
+    message: str
+    recoverable: bool = True
+
+
 __all__ = [
     "Assumption",
     "ActualInterface",
@@ -490,4 +792,40 @@ __all__ = [
     "CompilerResponse",
     "AnswersRequest",
     "ContractResponse",
+    # M5
+    "AgentType",
+    "AgentStatus",
+    "AssignmentStatus",
+    "ImplementMode",
+    "Agent",
+    "NeighborInterface",
+    "AssignmentPayload",
+    "AssignmentResult",
+    "Assignment",
+    "IntegrationMismatch",
+    "RegisterAgentRequest",
+    "RegisterAgentResponse",
+    "ListAgentsResponse",
+    "GetAssignmentResponse",
+    "ClaimNodeRequest",
+    "ClaimNodeResponse",
+    "NodeStatusRequest",
+    "NodeStatusResponse",
+    "SubmitImplementationRequest",
+    "SubmitImplementationResponse",
+    "ReleaseNodeRequest",
+    "ReleaseNodeResponse",
+    "FreezeResponse",
+    "ImplementRequest",
+    "ImplementResponse",
+    "GeneratedFilesResponse",
+    "WSMessageType",
+    "WSMessage",
+    "WSNodeStatusChanged",
+    "WSNodeProgress",
+    "WSNodeClaimed",
+    "WSAgentConnected",
+    "WSImplementationComplete",
+    "WSIntegrationResult",
+    "WSError",
 ]

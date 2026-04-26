@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  Assumption,
   CompilerResponse,
   Contract,
   Decision,
@@ -8,6 +9,7 @@ import type {
 import {
   API,
   isApiError,
+  type NodeUpdateRequest,
 } from "../api/client";
 
 /**
@@ -38,6 +40,10 @@ interface ContractState {
   isLoading: boolean;
   error: string | null;
 
+  // ---- M4: per-field user-edit tracking (nodeId -> fieldNames[]) ----
+  userEditedFields: Record<string, string[]>;
+  provenanceView: boolean;
+
   // ---- actions ----
   setSession: (sessionId: string, contract: Contract) => void;
   setVerificationResult: (result: CompilerResponse) => void;
@@ -50,11 +56,19 @@ interface ContractState {
   toggleSelectedEdge: (id: string) => void;
   clearSelection: () => void;
   resetSession: () => void;
+  clearUserEdits: () => void;
+  toggleProvenanceView: () => void;
+  setProvenanceView: (on: boolean) => void;
 
   // ---- thunks ----
   startSession: (prompt: string) => Promise<void>;
   verify: () => Promise<void>;
   submitAnswersAndRefine: (decisions: Decision[]) => Promise<void>;
+  updateNodeField: (
+    nodeId: string,
+    field: "description" | "responsibilities" | "assumptions",
+    value: string | string[] | Assumption[],
+  ) => Promise<void>;
 }
 
 const initialSelection = {
@@ -73,6 +87,8 @@ export const useContractStore = create<ContractState>((set, get) => ({
   ...initialSelection,
   isLoading: false,
   error: null,
+  userEditedFields: {},
+  provenanceView: false,
 
   setSession: (sessionId, contract) =>
     set({
@@ -84,6 +100,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
       uvdcScore: 0,
       iteration: 0,
       error: null,
+      userEditedFields: {},
       ...initialSelection,
     }),
 
@@ -131,7 +148,15 @@ export const useContractStore = create<ContractState>((set, get) => ({
       ...initialSelection,
       isLoading: false,
       error: null,
+      userEditedFields: {},
     }),
+
+  clearUserEdits: () => set({ userEditedFields: {} }),
+
+  toggleProvenanceView: () =>
+    set((s) => ({ provenanceView: !s.provenanceView })),
+
+  setProvenanceView: (provenanceView) => set({ provenanceView }),
 
   // ---------------------------------------------------------------------
   // Thunks
@@ -159,6 +184,50 @@ export const useContractStore = create<ContractState>((set, get) => ({
     }
     get().setVerificationResult(result);
     set({ isLoading: false });
+  },
+
+  updateNodeField: async (
+    nodeId: string,
+    field: "description" | "responsibilities" | "assumptions",
+    value: string | string[] | Assumption[],
+  ) => {
+    const sid = get().sessionId;
+    const contract = get().contract;
+    if (!sid || !contract) return;
+
+    const updates: NodeUpdateRequest = {};
+    if (field === "description") updates.description = value as string;
+    if (field === "responsibilities") {
+      updates.responsibilities = value as string[];
+    }
+    if (field === "assumptions") updates.assumptions = value as Assumption[];
+
+    set({ isLoading: true, error: null });
+    const result = await API.updateNode(sid, nodeId, updates);
+    if (isApiError(result)) {
+      set({ isLoading: false, error: result.detail });
+      return;
+    }
+
+    // Patch the node in-place. Treat the previous contract as the diff
+    // baseline so the graph highlights this single edit.
+    const updatedNodes = contract.nodes.map((n) =>
+      n.id === nodeId ? { ...n, ...result.node } : n,
+    );
+    const previousFields = get().userEditedFields[nodeId] ?? [];
+    const mergedFields = Array.from(
+      new Set([...previousFields, ...result.fields_updated]),
+    );
+
+    set({
+      previousContract: contract,
+      contract: { ...contract, nodes: updatedNodes },
+      isLoading: false,
+      userEditedFields: {
+        ...get().userEditedFields,
+        [nodeId]: mergedFields,
+      },
+    });
   },
 
   submitAnswersAndRefine: async (decisions: Decision[]) => {

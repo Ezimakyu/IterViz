@@ -39,7 +39,10 @@ from .logger import get_logger
 from .schemas import (
     CompilerOutput,
     Contract,
+    DecidedBy,
     Decision,
+    Node,
+    NodeUpdateRequest,
     Verdict,
     VerificationLogEntry,
 )
@@ -345,6 +348,91 @@ def add_decision(session_id: str, decision: Decision) -> Session:
         },
     )
     return update_contract(session_id, contract)
+
+
+def update_node(
+    session_id: str,
+    node_id: str,
+    updates: NodeUpdateRequest,
+) -> tuple[Node, list[str], dict[str, str]]:
+    """Update a single node and tag changed fields as ``decided_by: user``.
+
+    Only fields explicitly set on ``updates`` (i.e. not ``None``) are
+    considered. Setting a field to its current value is a no-op and does
+    not flip the node's provenance.
+
+    For ``assumptions``, every assumption in the new list is marked as
+    ``decided_by: user`` because the user is replacing the agent's
+    assumption set wholesale.
+
+    Returns:
+        Tuple of ``(updated_node, fields_updated, provenance_changes)``.
+
+    Raises:
+        SessionNotFoundError: if the session does not exist.
+        ValueError: if ``node_id`` is not present in the session's
+            contract.
+    """
+    session = get_session(session_id)
+    contract = session.contract
+
+    node = next((n for n in contract.nodes if n.id == node_id), None)
+    if node is None:
+        raise ValueError(f"node {node_id} not found in session {session_id}")
+
+    fields_updated: list[str] = []
+    provenance_changes: dict[str, str] = {}
+
+    if updates.description is not None and updates.description != node.description:
+        node.description = updates.description
+        fields_updated.append("description")
+        provenance_changes["description"] = DecidedBy.USER.value
+
+    if (
+        updates.responsibilities is not None
+        and list(updates.responsibilities) != list(node.responsibilities)
+    ):
+        node.responsibilities = list(updates.responsibilities)
+        fields_updated.append("responsibilities")
+        provenance_changes["responsibilities"] = DecidedBy.USER.value
+
+    if updates.assumptions is not None:
+        # Replace the assumption set; force every entry to user-decided so
+        # the Compiler stops asking about them.
+        new_assumptions = []
+        for assumption in updates.assumptions:
+            assumption_copy = assumption.model_copy(
+                update={"decided_by": DecidedBy.USER}
+            )
+            new_assumptions.append(assumption_copy)
+        # Treat any change to the assumptions list as a real update.
+        existing = [a.model_dump(mode="json") for a in node.assumptions]
+        proposed = [a.model_dump(mode="json") for a in new_assumptions]
+        if existing != proposed:
+            node.assumptions = new_assumptions
+            fields_updated.append("assumptions")
+            provenance_changes["assumptions"] = DecidedBy.USER.value
+
+    if fields_updated:
+        node.decided_by = DecidedBy.USER
+        update_contract(session_id, contract)
+        log.info(
+            "contract.node_updated",
+            extra={
+                "session_id": session_id,
+                "node_id": node_id,
+                "fields_updated": fields_updated,
+                "provenance_changes": provenance_changes,
+                "new_decided_by": DecidedBy.USER.value,
+            },
+        )
+    else:
+        log.debug(
+            "contract.node_update_noop",
+            extra={"session_id": session_id, "node_id": node_id},
+        )
+
+    return node, fields_updated, provenance_changes
 
 
 def add_verification_run(

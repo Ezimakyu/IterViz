@@ -255,6 +255,125 @@ def test_verify_unknown_session_404(client):
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# M4: Node update endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestNodeUpdateEndpoint:
+    """``PATCH /sessions/{id}/nodes/{node_id}`` flips ``decided_by`` to
+    ``user`` for any field the user changes. Structural fields are not
+    accepted.
+    """
+
+    def test_patch_node_updates_field_and_provenance(self, client):
+        body = _create_session(client)
+        sid = body["session_id"]
+        node_id = body["contract"]["nodes"][0]["id"]
+
+        resp = client.patch(
+            f"/api/v1/sessions/{sid}/nodes/{node_id}",
+            json={"description": "User-edited description"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["node"]["description"] == "User-edited description"
+        assert data["fields_updated"] == ["description"]
+        assert data["provenance_set"] == {"description": "user"}
+        assert data["node"]["decided_by"] == "user"
+
+        # Persistence — refetch the contract.
+        fetched = client.get(f"/api/v1/sessions/{sid}").json()
+        persisted = next(
+            n for n in fetched["contract"]["nodes"] if n["id"] == node_id
+        )
+        assert persisted["description"] == "User-edited description"
+        assert persisted["decided_by"] == "user"
+
+    def test_patch_node_unknown_node_returns_404(self, client):
+        body = _create_session(client)
+        sid = body["session_id"]
+
+        resp = client.patch(
+            f"/api/v1/sessions/{sid}/nodes/no-such-node",
+            json={"description": "x"},
+        )
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+    def test_patch_node_unknown_session_returns_404(self, client):
+        resp = client.patch(
+            "/api/v1/sessions/missing-session/nodes/anything",
+            json={"description": "x"},
+        )
+        assert resp.status_code == 404
+
+    def test_patch_node_rejects_structural_fields(self, client):
+        body = _create_session(client)
+        sid = body["session_id"]
+        node_id = body["contract"]["nodes"][0]["id"]
+
+        resp = client.patch(
+            f"/api/v1/sessions/{sid}/nodes/{node_id}",
+            json={"id": "different-id", "name": "Renamed"},
+        )
+        # ``extra="forbid"`` + Pydantic's "extra inputs are not permitted"
+        # surfaces as a 422.
+        assert resp.status_code == 422
+
+    def test_patch_node_multi_field_update(self, client):
+        body = _create_session(client)
+        sid = body["session_id"]
+        node_id = body["contract"]["nodes"][0]["id"]
+
+        resp = client.patch(
+            f"/api/v1/sessions/{sid}/nodes/{node_id}",
+            json={
+                "description": "New description",
+                "responsibilities": ["one", "two"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert set(data["fields_updated"]) == {"description", "responsibilities"}
+        assert data["node"]["responsibilities"] == ["one", "two"]
+        assert data["provenance_set"] == {
+            "description": "user",
+            "responsibilities": "user",
+        }
+
+    def test_verify_after_user_edit_does_not_decrease_uvdc(self, client):
+        """After a user edit, UVDC should be at least as high as before."""
+        body = _create_session(client)
+        sid = body["session_id"]
+
+        before = client.post(
+            f"/api/v1/sessions/{sid}/compiler/verify"
+        ).json()["uvdc_score"]
+
+        # Force a node to agent-decided so the edit can move the needle.
+        node_id = body["contract"]["nodes"][0]["id"]
+        # The make_sample_contract fixture sets node[0] decided_by=PROMPT
+        # already, so editing it doesn't increase coverage. Edit node[2]
+        # which is decided_by=AGENT.
+        for n in body["contract"]["nodes"]:
+            if n["decided_by"] == "agent":
+                node_id = n["id"]
+                break
+
+        resp = client.patch(
+            f"/api/v1/sessions/{sid}/nodes/{node_id}",
+            json={"description": "User-confirmed description"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        after = client.post(
+            f"/api/v1/sessions/{sid}/compiler/verify"
+        ).json()["uvdc_score"]
+
+        assert after >= before
+
+
 def test_refine_with_empty_body_uses_existing_decisions(client):
     body = _create_session(client)
     sid = body["session_id"]

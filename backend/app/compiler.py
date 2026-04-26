@@ -341,7 +341,12 @@ def check_inv006_cyclic_data_dependency(contract: Contract) -> list[Violation]:
 
 
 def check_inv007_dangling_assumptions(contract: Contract) -> list[Violation]:
-    """INV-007: load_bearing & decided_by=agent assumptions must surface a question."""
+    """INV-007: load_bearing & decided_by=agent assumptions must surface a question.
+
+    M4 provenance behavior: user-decided nodes/edges are exempt entirely.
+    The user has explicitly signed off on the node, so we do not pester
+    them with questions about its agent-decided assumptions.
+    """
     out: list[Violation] = []
 
     def _check(element_id: str, element_name: str, assumptions, open_questions):
@@ -371,9 +376,15 @@ def check_inv007_dangling_assumptions(contract: Contract) -> list[Violation]:
             )
 
     for node in contract.nodes:
+        if _enum_value(node.decided_by) == "user":
+            # User has vouched for the whole node; don't surface its
+            # agent-tagged assumptions as questions.
+            continue
         _check(node.id, node.name, node.assumptions, node.open_questions)
     by_id = {n.id: n for n in contract.nodes}
     for edge in contract.edges:
+        if _enum_value(edge.decided_by) == "user":
+            continue
         # Edges have no open_questions; consider their endpoints'.
         endpoint_questions = []
         for endpoint in (edge.source, edge.target):
@@ -417,13 +428,8 @@ def run_invariant_checks(contract: Contract) -> list[Violation]:
 # UVDC + ranking
 # ---------------------------------------------------------------------------
 
-def compute_uvdc(contract: Contract) -> float:
-    """User-Visible Decision Coverage score.
-
-    Defined as ``(# load-bearing fields decided_by user/prompt) / (# total
-    load-bearing fields)``. Returns 1.0 when there are no load-bearing
-    fields (vacuously fully covered).
-    """
+def _uvdc_components(contract: Contract) -> tuple[int, int]:
+    """Return ``(total_load_bearing, user_or_prompt_decided)`` counts."""
     total = 0
     user_or_prompt = 0
 
@@ -446,9 +452,36 @@ def compute_uvdc(contract: Contract) -> float:
             if assumption.load_bearing:
                 _bump(assumption.decided_by)
 
+    return total, user_or_prompt
+
+
+def compute_uvdc(contract: Contract) -> float:
+    """User-Visible Decision Coverage score.
+
+    Defined as ``(# load-bearing fields decided_by user/prompt) / (# total
+    load-bearing fields)``. Returns 1.0 when there are no load-bearing
+    fields (vacuously fully covered).
+
+    M4 emits a structured ``compiler.uvdc_breakdown`` log line so the
+    frontend / ops can correlate UVDC changes with user edits.
+    """
+    total, user_or_prompt = _uvdc_components(contract)
+
     if total == 0:
-        return 1.0
-    return round(user_or_prompt / total, 4)
+        score = 1.0
+    else:
+        score = round(user_or_prompt / total, 4)
+
+    log.info(
+        "compiler.uvdc_breakdown",
+        extra={
+            "session_id": getattr(contract.meta, "id", None),
+            "total_load_bearing_fields": total,
+            "user_or_prompt_decided": user_or_prompt,
+            "uvdc_score": score,
+        },
+    )
+    return score
 
 
 _VIOLATION_TYPE_RANK = {
@@ -550,9 +583,18 @@ def _trust_boundary_edges(contract: Contract) -> list[Edge]:
 
 
 def _provenance_violations(contract: Contract) -> list[Violation]:
-    """Static provenance check: load-bearing fields decided_by=agent."""
+    """Static provenance check: load-bearing fields decided_by=agent.
+
+    M4 behavior: nodes/edges where the user has signed off
+    (``decided_by == "user"``) are skipped entirely. The user has taken
+    ownership of those elements so the Compiler should stop nagging
+    about them, even for assumptions that internally still carry an
+    older ``agent`` tag.
+    """
     out: list[Violation] = []
     for node in contract.nodes:
+        if _enum_value(node.decided_by) == "user":
+            continue
         if _enum_value(node.decided_by) == "agent":
             out.append(
                 Violation(
@@ -590,6 +632,8 @@ def _provenance_violations(contract: Contract) -> list[Violation]:
                     )
                 )
     for edge in contract.edges:
+        if _enum_value(edge.decided_by) == "user":
+            continue
         if _enum_value(edge.decided_by) == "agent":
             out.append(
                 Violation(
@@ -720,6 +764,46 @@ def verify_contract(
         },
     )
     started = time.perf_counter()
+
+    # M4: emit a single high-signal log line summarising provenance state
+    # before we run the checks. This is what the M4 acceptance criteria
+    # call ``compiler.provenance_check_start``.
+    user_decided_nodes = sum(
+        1 for n in contract.nodes if _enum_value(n.decided_by) == "user"
+    )
+    agent_decided_nodes = sum(
+        1 for n in contract.nodes if _enum_value(n.decided_by) == "agent"
+    )
+    prompt_decided_nodes = sum(
+        1 for n in contract.nodes if _enum_value(n.decided_by) == "prompt"
+    )
+    log.info(
+        "compiler.provenance_check_start",
+        extra={
+            "session_id": contract.meta.id,
+            "total_nodes": len(contract.nodes),
+            "user_decided_nodes": user_decided_nodes,
+            "agent_decided_nodes": agent_decided_nodes,
+            "prompt_decided_nodes": prompt_decided_nodes,
+        },
+    )
+    for node in contract.nodes:
+        log.debug(
+            "compiler.node_provenance_detail",
+            extra={
+                "node_id": node.id,
+                "node_name": node.name,
+                "decided_by": _enum_value(node.decided_by),
+                "load_bearing_assumptions": sum(
+                    1 for a in node.assumptions if a.load_bearing
+                ),
+                "user_decided_assumptions": sum(
+                    1
+                    for a in node.assumptions
+                    if _enum_value(a.decided_by) == "user"
+                ),
+            },
+        )
 
     invariant_violations = run_invariant_checks(contract)
     failure_violations = _failure_scenario_violations(contract)

@@ -7,9 +7,11 @@
  */
 
 import type {
+  Assumption,
   CompilerResponse,
   Contract,
   ContractDiff,
+  ContractNode,
   Decision,
 } from "../types/contract";
 
@@ -107,10 +109,41 @@ export function refineContract(sessionId: string, answers: Decision[] = []) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// M4: Node update
+// ---------------------------------------------------------------------------
+
+export interface NodeUpdateRequest {
+  description?: string;
+  responsibilities?: string[];
+  assumptions?: Assumption[];
+}
+
+export interface NodeUpdateResponse {
+  node: ContractNode;
+  fields_updated: string[];
+  provenance_set: Record<string, string>;
+}
+
+export function updateNode(
+  sessionId: string,
+  nodeId: string,
+  updates: NodeUpdateRequest,
+) {
+  return request<NodeUpdateResponse>(
+    `/sessions/${sessionId}/nodes/${nodeId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    },
+  );
+}
+
 export const API = {
   createSession,
   getSession,
   verifyContract,
   submitAnswers,
   refineContract,
+  updateNode,
 };

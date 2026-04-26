@@ -213,8 +213,11 @@ def call_compiler(
         # routinely exceed 16k tokens once the contract has been refined
         # three times (decisions list, expanded assumptions, payload
         # schemas), so we set a generous ceiling and rely on instructor's
-        # retry to recover any partial output.
+        # retry to recover any partial output. We also pass an explicit
+        # timeout to bypass the SDK's nonstreaming-duration check, which
+        # otherwise rejects max_tokens > ~21k.
         common_kwargs["max_tokens"] = 32768
+        common_kwargs["timeout"] = 900.0
 
     result: CompilerOutput = client.chat.completions.create(**common_kwargs)
     duration_ms = int((time.perf_counter() - start) * 1000)
@@ -252,6 +255,7 @@ def call_structured(
     temperature: float = 0.0,
     max_tokens: int = 32768,
     max_retries: int = 2,
+    timeout: float = 900.0,
 ) -> T:
     """Generic structured-output call.
 
@@ -287,6 +291,7 @@ def call_structured(
     }
     if provider == "anthropic":
         common_kwargs["max_tokens"] = max_tokens
+        common_kwargs["timeout"] = timeout
 
     result: T = client.chat.completions.create(**common_kwargs)
     duration_ms = int((time.perf_counter() - start) * 1000)

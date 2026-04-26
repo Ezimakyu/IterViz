@@ -6,11 +6,14 @@ Routes are intentionally thin: validate, delegate to the service layer
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from . import architect as architect_svc
 from . import compiler as compiler_svc
 from . import contract as contract_svc
+from . import subgraph as subgraph_svc
+from . import subgraphs as subgraphs_store
+from . import ws as ws_svc
 from .logger import get_logger
 from .schemas import (
     AnswersRequest,
@@ -19,11 +22,16 @@ from .schemas import (
     ContractResponse,
     CreateSessionRequest,
     CreateSessionResponse,
+    GenerateSubgraphResponse,
     GetSessionResponse,
+    GetSubgraphResponse,
+    ImplementationSubgraph,
     NodeUpdateRequest,
     NodeUpdateResponse,
     RefineRequest,
     RefineResponse,
+    UpdateSubgraphNodeRequest,
+    UpdateSubgraphNodeResponse,
 )
 
 log = get_logger(__name__)
@@ -225,3 +233,161 @@ def refine_session(
         "n_edges_after": len(persisted.contract.edges),
     }
     return RefineResponse(contract=persisted.contract, diff=diff)
+
+
+# ---------------------------------------------------------------------------
+# M6: Implementation subgraphs
+# ---------------------------------------------------------------------------
+
+
+def _find_node_or_404(
+    session: contract_svc.Session, node_id: str
+):
+    node = next((n for n in session.contract.nodes if n.id == node_id), None)
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"node {node_id} not found in session {session.id}",
+        )
+    return node
+
+
+@router.post(
+    "/sessions/{session_id}/nodes/{node_id}/subgraph",
+    response_model=GenerateSubgraphResponse,
+)
+async def generate_node_subgraph(
+    session_id: str, node_id: str
+) -> GenerateSubgraphResponse:
+    """Generate (or regenerate) the implementation subgraph for a node.
+
+    M6: bypasses the verification loop -- the parent node is assumed to
+    already have UVDC = 1.0. The generated subgraph is stored in memory
+    and broadcast to all session subscribers.
+    """
+
+    log.info(
+        "api.subgraph_generate",
+        extra={"session_id": session_id, "node_id": node_id},
+    )
+    try:
+        session = contract_svc.get_session(session_id)
+    except contract_svc.SessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    node = _find_node_or_404(session, node_id)
+    neighbor_interfaces = subgraph_svc.get_neighbor_interfaces(
+        node, session.contract
+    )
+
+    try:
+        subgraph = subgraph_svc.generate_subgraph(
+            node, session.contract, neighbor_interfaces
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Subgraph generator unavailable: {exc}",
+        ) from exc
+
+    subgraphs_store.store_subgraph(subgraph)
+    await ws_svc.broadcast_subgraph_created(session_id, node_id, subgraph)
+
+    return GenerateSubgraphResponse(subgraph=subgraph)
+
+
+@router.get(
+    "/sessions/{session_id}/nodes/{node_id}/subgraph",
+    response_model=GetSubgraphResponse,
+)
+def get_node_subgraph(session_id: str, node_id: str) -> GetSubgraphResponse:
+    """Return the cached subgraph for a node, or ``null`` if none."""
+
+    return GetSubgraphResponse(
+        subgraph=subgraphs_store.get_subgraph(session_id, node_id)
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/subgraphs",
+    response_model=list[ImplementationSubgraph],
+)
+def get_all_session_subgraphs(
+    session_id: str,
+) -> list[ImplementationSubgraph]:
+    """Return every cached subgraph for a session."""
+
+    return subgraphs_store.get_all_subgraphs(session_id)
+
+
+@router.patch(
+    "/sessions/{session_id}/nodes/{node_id}/subgraph/nodes/{subgraph_node_id}",
+    response_model=UpdateSubgraphNodeResponse,
+)
+async def update_subgraph_node(
+    session_id: str,
+    node_id: str,
+    subgraph_node_id: str,
+    body: UpdateSubgraphNodeRequest,
+) -> UpdateSubgraphNodeResponse:
+    """Update a subgraph node's status and broadcast the change.
+
+    Returns ``success=False`` (200) when the subgraph itself does not
+    exist yet -- callers should call POST /subgraph first.
+    Returns 404 when the parent node id is unknown to the subgraph.
+    """
+
+    subgraph = subgraphs_store.get_subgraph(session_id, node_id)
+    if subgraph is None:
+        return UpdateSubgraphNodeResponse(success=False, subgraph=None)
+
+    try:
+        updated = subgraph_svc.update_subgraph_node_status(
+            subgraph,
+            subgraph_node_id,
+            body.status,
+            body.error_message,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    subgraphs_store.update_subgraph(updated)
+    await ws_svc.broadcast_subgraph_node_status_changed(
+        session_id,
+        node_id,
+        subgraph_node_id,
+        body.status,
+        updated.progress,
+    )
+
+    return UpdateSubgraphNodeResponse(success=True, subgraph=updated)
+
+
+# ---------------------------------------------------------------------------
+# M6: Session WebSocket stream
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/sessions/{session_id}/stream")
+async def session_stream(websocket: WebSocket, session_id: str) -> None:
+    """Bidirectional stream for live session events.
+
+    The server only broadcasts; client-sent frames are read and
+    discarded so the connection lifecycle stays under the client's
+    control. M5 will extend the broadcast set with node-status events.
+    """
+
+    await ws_svc.manager.connect(session_id, websocket)
+    try:
+        while True:
+            # We don't expect commands today, but receiving keeps the
+            # connection alive and lets us notice client disconnects.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_svc.manager.disconnect(session_id, websocket)

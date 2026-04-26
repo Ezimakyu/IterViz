@@ -484,6 +484,177 @@ class NodeUpdateResponse(BaseModel):
     provenance_set: dict[str, str] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# M6: Implementation Subgraph models
+# ---------------------------------------------------------------------------
+
+
+class SubgraphNodeKind(str, Enum):
+    """Types of nodes in an implementation subgraph."""
+
+    FUNCTION = "function"
+    MODULE = "module"
+    TEST_UNIT = "test_unit"
+    TEST_INTEGRATION = "test_integration"
+    TEST_EVAL = "test_eval"
+    TYPE_DEF = "type_def"
+    CONFIG = "config"
+    ERROR_HANDLER = "error_handler"
+    UTIL = "util"
+
+
+class SubgraphNodeStatus(str, Enum):
+    """Status of a subgraph node during implementation."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class SubgraphNode(BaseModel):
+    """A node in an implementation subgraph.
+
+    Subgraph nodes are concrete implementation tasks derived from a
+    verified big-picture node. They never carry architectural
+    assumptions -- those belong on the parent ``Node``.
+    """
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    id: str
+    name: str
+    kind: SubgraphNodeKind
+    description: str = ""
+    status: SubgraphNodeStatus = SubgraphNodeStatus.PENDING
+
+    signature: Optional[str] = None
+    dependencies: list[str] = Field(default_factory=list)
+    estimated_lines: Optional[int] = None
+
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class SubgraphEdge(BaseModel):
+    """An edge in an implementation subgraph (dependency relationship)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    source: str
+    target: str
+    kind: str = "dependency"
+    label: Optional[str] = None
+
+
+class ImplementationSubgraph(BaseModel):
+    """Implementation breakdown for a single big-picture node.
+
+    Generated once when implementation starts; updated live as work
+    progresses. Does NOT go through the verification loop -- the
+    parent node's specification is already verified (UVDC = 1.0).
+    """
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    id: str
+    parent_node_id: str
+    parent_node_name: str
+    session_id: str
+    created_at: datetime
+
+    nodes: list[SubgraphNode] = Field(default_factory=list)
+    edges: list[SubgraphEdge] = Field(default_factory=list)
+
+    status: SubgraphNodeStatus = SubgraphNodeStatus.PENDING
+    progress: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    total_estimated_lines: Optional[int] = None
+
+
+class GenerateSubgraphRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+
+
+class GenerateSubgraphResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    subgraph: ImplementationSubgraph
+
+
+class GetSubgraphResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    subgraph: Optional[ImplementationSubgraph] = None
+
+
+class UpdateSubgraphNodeRequest(BaseModel):
+    """Body for PATCH ``/sessions/{id}/nodes/{node_id}/subgraph/nodes/{sg_id}``.
+
+    The Pydantic config forbids unknown keys -- this catches stray
+    fields like ``subgraph_node_id`` that callers used to send. The
+    subgraph-node id is supplied via the URL path, not the body.
+    """
+
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+
+    status: SubgraphNodeStatus
+    error_message: Optional[str] = None
+
+
+class UpdateSubgraphNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+    subgraph: Optional[ImplementationSubgraph] = None
+
+
+# ---------------------------------------------------------------------------
+# M6: WebSocket message models
+# ---------------------------------------------------------------------------
+
+
+class WSMessageType(str, Enum):
+    """Discriminator for broadcast messages on the session WS stream.
+
+    M6 covers implementation-subgraph events. M5 will extend this
+    enum with node/agent/assignment event types.
+    """
+
+    SUBGRAPH_CREATED = "subgraph_created"
+    SUBGRAPH_NODE_STATUS_CHANGED = "subgraph_node_status_changed"
+
+
+class WSMessage(BaseModel):
+    """Base class for messages broadcast on the session WS stream."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    type: WSMessageType
+
+
+class WSSubgraphCreated(WSMessage):
+    """Broadcast when a subgraph is generated for a big-picture node."""
+
+    type: WSMessageType = WSMessageType.SUBGRAPH_CREATED
+    parent_node_id: str
+    subgraph: ImplementationSubgraph
+
+
+class WSSubgraphNodeStatusChanged(WSMessage):
+    """Broadcast when a subgraph node transitions status."""
+
+    type: WSMessageType = WSMessageType.SUBGRAPH_NODE_STATUS_CHANGED
+    parent_node_id: str
+    subgraph_node_id: str
+    status: SubgraphNodeStatus
+    progress: float = Field(ge=0.0, le=1.0)
+
+
 __all__ = [
     "Assumption",
     "ActualInterface",
@@ -524,4 +695,19 @@ __all__ = [
     "ContractResponse",
     "NodeUpdateRequest",
     "NodeUpdateResponse",
+    # M6 -------------------------------------------------------------
+    "SubgraphNodeKind",
+    "SubgraphNodeStatus",
+    "SubgraphNode",
+    "SubgraphEdge",
+    "ImplementationSubgraph",
+    "GenerateSubgraphRequest",
+    "GenerateSubgraphResponse",
+    "GetSubgraphResponse",
+    "UpdateSubgraphNodeRequest",
+    "UpdateSubgraphNodeResponse",
+    "WSMessageType",
+    "WSMessage",
+    "WSSubgraphCreated",
+    "WSSubgraphNodeStatusChanged",
 ]

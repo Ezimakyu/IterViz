@@ -14,6 +14,10 @@ import type {
   ContractNode,
   Decision,
 } from "../types/contract";
+import type {
+  ImplementationSubgraph,
+  SubgraphNodeStatus,
+} from "../types/subgraph";
 
 const API_BASE = (
   (import.meta as ImportMeta & { env?: { VITE_API_BASE?: string } }).env
@@ -139,6 +143,76 @@ export function updateNode(
   );
 }
 
+// ---------------------------------------------------------------------------
+// M6: Implementation subgraphs
+// ---------------------------------------------------------------------------
+
+export interface SubgraphResponse {
+  subgraph: ImplementationSubgraph;
+}
+
+export interface OptionalSubgraphResponse {
+  subgraph: ImplementationSubgraph | null;
+}
+
+export interface UpdateSubgraphNodeResponse {
+  success: boolean;
+  subgraph: ImplementationSubgraph | null;
+}
+
+export function generateSubgraph(sessionId: string, nodeId: string) {
+  return request<SubgraphResponse>(
+    `/sessions/${sessionId}/nodes/${nodeId}/subgraph`,
+    { method: "POST" },
+  );
+}
+
+export function getSubgraph(sessionId: string, nodeId: string) {
+  return request<OptionalSubgraphResponse>(
+    `/sessions/${sessionId}/nodes/${nodeId}/subgraph`,
+    { method: "GET" },
+  );
+}
+
+export function getAllSubgraphs(sessionId: string) {
+  return request<ImplementationSubgraph[]>(
+    `/sessions/${sessionId}/subgraphs`,
+    { method: "GET" },
+  );
+}
+
+export function updateSubgraphNodeStatus(
+  sessionId: string,
+  nodeId: string,
+  subgraphNodeId: string,
+  status: SubgraphNodeStatus,
+  errorMessage?: string,
+) {
+  return request<UpdateSubgraphNodeResponse>(
+    `/sessions/${sessionId}/nodes/${nodeId}/subgraph/nodes/${subgraphNodeId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status,
+        ...(errorMessage !== undefined ? { error_message: errorMessage } : {}),
+      }),
+    },
+  );
+}
+
+export function sessionStreamUrl(sessionId: string): string {
+  // Browsers reject mixed http/ws schemes; derive ws/wss from the API base.
+  const httpUrl = `${API_BASE}/sessions/${sessionId}/stream`;
+  if (httpUrl.startsWith("https://")) return `wss://${httpUrl.slice(8)}`;
+  if (httpUrl.startsWith("http://")) return `ws://${httpUrl.slice(7)}`;
+  // Relative base: build from window.location.
+  if (typeof window !== "undefined") {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${proto}://${window.location.host}${API_BASE}/sessions/${sessionId}/stream`;
+  }
+  return httpUrl;
+}
+
 export const API = {
   createSession,
   getSession,
@@ -146,4 +220,9 @@ export const API = {
   submitAnswers,
   refineContract,
   updateNode,
+  generateSubgraph,
+  getSubgraph,
+  getAllSubgraphs,
+  updateSubgraphNodeStatus,
+  sessionStreamUrl,
 };

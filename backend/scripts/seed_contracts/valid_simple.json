@@ -1,0 +1,143 @@
+{
+  "meta": {
+    "id": "c-valid-simple",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Receive a webhook from Stripe and store the parsed event in a Postgres table.",
+    "prompt_history": [
+      {"role": "user", "content": "Persist Stripe events to Postgres."}
+    ]
+  },
+  "nodes": [
+    {
+      "id": "n-webhook",
+      "name": "Stripe Webhook Receiver",
+      "kind": "service",
+      "description": "Accepts inbound Stripe webhook POSTs and verifies signatures.",
+      "responsibilities": ["Verify Stripe signature", "Parse JSON body"],
+      "decided_by": "user",
+      "confidence": 0.95
+    },
+    {
+      "id": "n-stripe",
+      "name": "Stripe API",
+      "kind": "external",
+      "description": "Stripe's webhook delivery and signature scheme.",
+      "responsibilities": ["Deliver events", "Sign payloads"],
+      "decided_by": "user",
+      "confidence": 0.99,
+      "is_terminal": true
+    },
+    {
+      "id": "n-handler",
+      "name": "Event Handler",
+      "kind": "service",
+      "description": "Routes verified events to the persistence layer.",
+      "responsibilities": ["Validate event type", "Hand off to store"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-pg",
+      "name": "Postgres Events Table",
+      "kind": "store",
+      "description": "Single table storing Stripe events keyed by event id.",
+      "responsibilities": ["Persist event JSON", "Deduplicate by event id"],
+      "decided_by": "user",
+      "confidence": 0.95,
+      "assumptions": [
+        {"text": "Table is keyed on Stripe's event id.", "confidence": 0.9, "decided_by": "user", "load_bearing": true}
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-stripe-webhook",
+      "source": "n-stripe",
+      "target": "n-webhook",
+      "kind": "data",
+      "label": "webhook POST",
+      "payload_schema": {"type": "object", "required": ["id", "type", "data"]},
+      "decided_by": "user",
+      "confidence": 0.95
+    },
+    {
+      "id": "e-webhook-handler",
+      "source": "n-webhook",
+      "target": "n-handler",
+      "kind": "data",
+      "label": "verified event",
+      "payload_schema": {"type": "object", "required": ["id", "type", "data"]},
+      "decided_by": "user",
+      "confidence": 0.95
+    },
+    {
+      "id": "e-handler-pg",
+      "source": "n-handler",
+      "target": "n-pg",
+      "kind": "data",
+      "label": "insert row",
+      "payload_schema": {"type": "object", "required": ["id", "type", "raw_json"]},
+      "decided_by": "user",
+      "confidence": 0.9
+    }
+  ],
+  "failure_scenarios": [
+    {
+      "id": "fs-1",
+      "trigger": "edge:e-stripe-webhook signature invalid",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "auth_failure",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Webhook returns 400; Stripe retries.",
+      "resolved": true
+    },
+    {
+      "id": "fs-2",
+      "trigger": "edge:e-stripe-webhook timeout",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "timeout",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Stripe retries with exponential backoff.",
+      "resolved": true
+    },
+    {
+      "id": "fs-3",
+      "trigger": "edge:e-stripe-webhook rate_limit",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "rate_limit",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Webhook returns 429; Stripe backs off.",
+      "resolved": true
+    },
+    {
+      "id": "fs-4",
+      "trigger": "edge:e-stripe-webhook partial_data",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "partial_data",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Webhook rejects malformed payload with 400.",
+      "resolved": true
+    },
+    {
+      "id": "fs-5",
+      "trigger": "edge:e-stripe-webhook schema_drift",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "schema_drift",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Webhook logs unknown fields and continues.",
+      "resolved": true
+    },
+    {
+      "id": "fs-6",
+      "trigger": "edge:e-stripe-webhook unavailable",
+      "affected_edge": "e-stripe-webhook",
+      "failure_type": "unavailable",
+      "expected_handler": "n-webhook",
+      "simulated_outcome": "Stripe queues events for later delivery.",
+      "resolved": true
+    }
+  ],
+  "decisions": [],
+  "verification_log": []
+}

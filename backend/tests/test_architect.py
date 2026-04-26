@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from app import architect as architect_svc
 from app.schemas import Contract, Decision
 
 from .conftest import make_sample_contract
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
 
 
 @pytest.fixture
@@ -81,11 +87,13 @@ def test_refine_contract_appends_answers_and_bumps_version(mock_llm):
 
     answers = [
         Decision(
+            id=_new_id(),
             question="Which database?",
             answer="Postgres 15",
             affects=[base.nodes[2].id],
         ),
         Decision(
+            id=_new_id(),
             question="Auth strategy?",
             answer="JWT in httpOnly cookies",
             affects=[base.nodes[1].id],
@@ -102,13 +110,13 @@ def test_refine_contract_appends_answers_and_bumps_version(mock_llm):
 
 def test_refine_contract_does_not_drop_pre_existing_decisions(mock_llm):
     base = make_sample_contract()
-    pre = Decision(question="Existing?", answer="yes")
+    pre = Decision(id=_new_id(), question="Existing?", answer="yes")
     base.decisions.append(pre)
 
     response = base.model_copy(deep=True)
     mock_llm.next_contract = response
 
-    new_answer = Decision(question="New?", answer="also yes")
+    new_answer = Decision(id=_new_id(), question="New?", answer="also yes")
     refined = architect_svc.refine_contract(base, [new_answer])
 
     ids = {d.id for d in refined.decisions}

@@ -1,0 +1,71 @@
+{
+  "meta": {
+    "id": "c-unhandled",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Read a Slack DM and write a summary to a database."
+  },
+  "nodes": [
+    {
+      "id": "n-slack",
+      "name": "Slack API",
+      "kind": "external",
+      "responsibilities": ["Deliver DMs via OAuth-protected REST"],
+      "decided_by": "user",
+      "confidence": 0.95,
+      "is_terminal": true
+    },
+    {
+      "id": "n-reader",
+      "name": "DM Reader",
+      "kind": "service",
+      "responsibilities": ["Pull DMs for a user"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-summarizer",
+      "name": "Summarizer",
+      "kind": "service",
+      "responsibilities": ["Produce a one-paragraph summary"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-pg",
+      "name": "Summaries Table",
+      "kind": "store",
+      "responsibilities": ["Persist summaries"],
+      "decided_by": "user",
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-slack-reader",
+      "source": "n-slack",
+      "target": "n-reader",
+      "kind": "data",
+      "label": "DM payload",
+      "payload_schema": {"type": "object", "required": ["channel", "text"]},
+      "decided_by": "user"
+    },
+    {
+      "id": "e-reader-sum",
+      "source": "n-reader",
+      "target": "n-summarizer",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    },
+    {
+      "id": "e-sum-pg",
+      "source": "n-summarizer",
+      "target": "n-pg",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    }
+  ],
+  "failure_scenarios": []
+}

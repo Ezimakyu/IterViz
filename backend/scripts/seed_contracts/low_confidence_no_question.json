@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "id": "c-lowconf",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Store user activity events in an analytics warehouse."
+  },
+  "nodes": [
+    {
+      "id": "n-collector",
+      "name": "Event Collector",
+      "kind": "service",
+      "responsibilities": ["Receive events over HTTP"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-warehouse",
+      "name": "Analytics Warehouse",
+      "kind": "store",
+      "responsibilities": ["Long-term event storage"],
+      "decided_by": "user",
+      "confidence": 0.4,
+      "open_questions": []
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-coll-wh",
+      "source": "n-collector",
+      "target": "n-warehouse",
+      "kind": "data",
+      "payload_schema": {"type": "object", "required": ["event_name", "user_id", "ts"]},
+      "decided_by": "user",
+      "confidence": 0.9
+    }
+  ]
+}

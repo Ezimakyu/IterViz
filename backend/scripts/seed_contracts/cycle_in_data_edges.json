@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "id": "c-cycle",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Two services exchange records and persist results in a database."
+  },
+  "nodes": [
+    {
+      "id": "n-a",
+      "name": "Service A",
+      "kind": "service",
+      "responsibilities": ["Enrich a record"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-b",
+      "name": "Service B",
+      "kind": "service",
+      "responsibilities": ["Score a record"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-pg",
+      "name": "Results DB",
+      "kind": "store",
+      "responsibilities": ["Persist scored records"],
+      "decided_by": "user",
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-a-b",
+      "source": "n-a",
+      "target": "n-b",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    },
+    {
+      "id": "e-b-a",
+      "source": "n-b",
+      "target": "n-a",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    },
+    {
+      "id": "e-b-pg",
+      "source": "n-b",
+      "target": "n-pg",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "id": "c-missing-payload",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Move records from a CSV file into a Postgres table."
+  },
+  "nodes": [
+    {
+      "id": "n-reader",
+      "name": "CSV Reader",
+      "kind": "service",
+      "responsibilities": ["Read CSV rows"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-pg",
+      "name": "Postgres Table",
+      "kind": "store",
+      "responsibilities": ["Persist rows"],
+      "decided_by": "user",
+      "confidence": 0.9
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-reader-pg",
+      "source": "n-reader",
+      "target": "n-pg",
+      "kind": "data",
+      "label": "row insert",
+      "payload_schema": null,
+      "decided_by": "user"
+    }
+  ]
+}

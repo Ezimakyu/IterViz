@@ -12,6 +12,7 @@ the ``Contract`` Pydantic schema on the LLM output.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -22,8 +23,12 @@ from .schemas import Contract, Decision, PromptHistoryEntry
 log = get_logger(__name__)
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
 
 
 def _system_prompt() -> str:
@@ -52,10 +57,13 @@ def generate_contract(prompt: str) -> Contract:
 
     # Always reflect the original prompt in meta.prompt_history so the
     # downstream pipeline can audit what the user actually said.
+    if not contract.meta.id:
+        contract.meta.id = _new_id()
     contract.meta.prompt_history = [
-        PromptHistoryEntry(role="user", content=prompt, timestamp=_now_iso())
+        PromptHistoryEntry(role="user", content=prompt, timestamp=_now())
     ] + [e for e in contract.meta.prompt_history if e.content != prompt]
-    contract.meta.updated_at = _now_iso()
+    contract.meta.created_at = contract.meta.created_at or _now()
+    contract.meta.updated_at = _now()
     contract.meta.version = 1
 
     log.info(
@@ -120,7 +128,7 @@ def refine_contract(
     updated.meta.id = contract.meta.id
     updated.meta.version = contract.meta.version + 1
     updated.meta.created_at = contract.meta.created_at
-    updated.meta.updated_at = _now_iso()
+    updated.meta.updated_at = _now()
 
     log.info(
         "architect.refine.complete",

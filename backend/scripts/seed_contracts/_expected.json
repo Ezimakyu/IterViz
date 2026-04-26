@@ -1,0 +1,57 @@
+{
+  "_doc": "Expected violations per seed contract. A compiler violation matches an expected entry when its `type` equals (or is in `accept_types`) AND its `affects` overlaps `affects` (empty `affects` matches anything).",
+
+  "valid_simple.json": {
+    "verdict": "pass",
+    "expected": []
+  },
+
+  "orphaned_node.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "invariant", "affects": ["n-orphan-logger"], "rule": "INV-001"}
+    ]
+  },
+
+  "missing_payload.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "invariant", "affects": ["e-reader-pg"], "rule": "INV-004"}
+    ]
+  },
+
+  "silent_db_choice.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "provenance", "affects": ["n-store"], "accept_types": ["provenance", "invariant"], "rule": "decided_by=agent on load-bearing kind"}
+    ]
+  },
+
+  "unhandled_failure.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "failure_scenario", "affects": ["e-slack-reader"], "rule": "trust-boundary edge with no failure handler"}
+    ]
+  },
+
+  "intent_mismatch.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "intent_mismatch", "affects": [], "rule": "stated_intent disagrees with reconstructed intent"}
+    ]
+  },
+
+  "low_confidence_no_question.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "invariant", "affects": ["n-warehouse"], "rule": "INV-005"}
+    ]
+  },
+
+  "cycle_in_data_edges.json": {
+    "verdict": "fail",
+    "expected": [
+      {"type": "invariant", "affects": ["n-a", "n-b"], "rule": "INV-006"}
+    ]
+  }
+}

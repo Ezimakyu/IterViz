@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "id": "c-orphaned",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Persist Stripe events to Postgres."
+  },
+  "nodes": [
+    {
+      "id": "n-webhook",
+      "name": "Stripe Webhook Receiver",
+      "kind": "service",
+      "responsibilities": ["Verify signature"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-pg",
+      "name": "Postgres Events Table",
+      "kind": "store",
+      "responsibilities": ["Persist event JSON"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-orphan-logger",
+      "name": "Audit Logger",
+      "kind": "service",
+      "responsibilities": ["Write audit lines"],
+      "decided_by": "user",
+      "confidence": 0.9
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-webhook-pg",
+      "source": "n-webhook",
+      "target": "n-pg",
+      "kind": "data",
+      "payload_schema": {"type": "object"},
+      "decided_by": "user"
+    }
+  ]
+}

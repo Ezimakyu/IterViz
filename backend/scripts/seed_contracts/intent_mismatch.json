@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "id": "c-intent-mismatch",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "A Slack bot that summarizes DMs into a daily digest channel post."
+  },
+  "nodes": [
+    {
+      "id": "n-form",
+      "name": "Web Form",
+      "kind": "ui",
+      "responsibilities": ["Collect customer support tickets"],
+      "decided_by": "agent",
+      "confidence": 0.85
+    },
+    {
+      "id": "n-router",
+      "name": "Ticket Router",
+      "kind": "service",
+      "responsibilities": ["Categorize tickets and assign to a queue"],
+      "decided_by": "agent",
+      "confidence": 0.85
+    },
+    {
+      "id": "n-pg",
+      "name": "Tickets DB",
+      "kind": "store",
+      "responsibilities": ["Persist support tickets"],
+      "decided_by": "agent",
+      "confidence": 0.85
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-form-router",
+      "source": "n-form",
+      "target": "n-router",
+      "kind": "data",
+      "payload_schema": {"type": "object", "required": ["subject", "body", "email"]},
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-router-pg",
+      "source": "n-router",
+      "target": "n-pg",
+      "kind": "data",
+      "payload_schema": {"type": "object", "required": ["ticket_id", "category"]},
+      "decided_by": "agent"
+    }
+  ]
+}

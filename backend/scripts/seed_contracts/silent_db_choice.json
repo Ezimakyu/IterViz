@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "id": "c-silent-db",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "Save uploaded user files somewhere durable."
+  },
+  "nodes": [
+    {
+      "id": "n-uploader",
+      "name": "Upload Handler",
+      "kind": "service",
+      "responsibilities": ["Receive multipart upload"],
+      "decided_by": "user",
+      "confidence": 0.9
+    },
+    {
+      "id": "n-store",
+      "name": "File Store",
+      "kind": "store",
+      "responsibilities": ["Persist user-uploaded files"],
+      "decided_by": "agent",
+      "confidence": 0.7,
+      "assumptions": [
+        {"text": "S3 is the right backing store.", "confidence": 0.6, "decided_by": "agent", "load_bearing": true}
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-up-store",
+      "source": "n-uploader",
+      "target": "n-store",
+      "kind": "data",
+      "payload_schema": {"type": "object", "required": ["filename", "bytes"]},
+      "decided_by": "user"
+    }
+  ]
+}

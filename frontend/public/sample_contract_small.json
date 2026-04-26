@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "id": "small-cli-tool",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "A small CLI that reads a config file, fetches data, and writes a report."
+  },
+  "nodes": [
+    {
+      "id": "n-cli",
+      "name": "CLI Entry Point",
+      "kind": "interface",
+      "description": "Parses command-line args and orchestrates the run.",
+      "responsibilities": [
+        "Parse CLI flags",
+        "Load config file",
+        "Invoke fetcher and writer"
+      ],
+      "assumptions": [
+        {
+          "text": "User provides a YAML config path via --config.",
+          "confidence": 0.9,
+          "decided_by": "prompt",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.85,
+      "open_questions": ["Should --dry-run be supported in M0?"],
+      "decided_by": "prompt",
+      "status": "drafted"
+    },
+    {
+      "id": "n-fetcher",
+      "name": "Data Fetcher",
+      "kind": "service",
+      "description": "Reads source URLs from config and downloads them.",
+      "responsibilities": ["HTTP GET each source", "Retry on 5xx"],
+      "assumptions": [
+        {
+          "text": "Sources return JSON within 5 seconds.",
+          "confidence": 0.6,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.7,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-cache",
+      "name": "Local Cache",
+      "kind": "store",
+      "description": "Filesystem cache for fetched payloads keyed by URL hash.",
+      "responsibilities": ["Read/write cached responses", "Expire entries older than 24h"],
+      "assumptions": [
+        {
+          "text": "Disk has at least 100MB free for the cache.",
+          "confidence": 0.4,
+          "decided_by": "agent",
+          "load_bearing": false
+        }
+      ],
+      "confidence": 0.45,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-report",
+      "name": "Report Writer",
+      "kind": "service",
+      "description": "Renders fetched data into a Markdown report on disk.",
+      "responsibilities": ["Render Markdown", "Write to --output path"],
+      "assumptions": [
+        {
+          "text": "Output directory is writable.",
+          "confidence": 0.95,
+          "decided_by": "prompt",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.9,
+      "decided_by": "prompt",
+      "status": "drafted"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-cli-fetcher",
+      "source": "n-cli",
+      "target": "n-fetcher",
+      "kind": "control",
+      "label": "invoke fetch",
+      "payload_schema": null,
+      "confidence": 0.9,
+      "decided_by": "prompt"
+    },
+    {
+      "id": "e-fetcher-cache-write",
+      "source": "n-fetcher",
+      "target": "n-cache",
+      "kind": "data",
+      "label": "store payload",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "body": { "type": "string" },
+          "fetched_at": { "type": "string" }
+        },
+        "required": ["url", "body"]
+      },
+      "confidence": 0.7,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-cache-fetcher-read",
+      "source": "n-cache",
+      "target": "n-fetcher",
+      "kind": "data",
+      "label": "cache hit",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "body": { "type": "string" },
+          "fetched_at": { "type": "string" }
+        },
+        "required": ["body"]
+      },
+      "confidence": 0.65,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-fetcher-report",
+      "source": "n-fetcher",
+      "target": "n-report",
+      "kind": "data",
+      "label": "fetched payloads",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array" }
+        },
+        "required": ["items"]
+      },
+      "confidence": 0.75,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-cli-report",
+      "source": "n-cli",
+      "target": "n-report",
+      "kind": "control",
+      "label": "finalize",
+      "payload_schema": null,
+      "confidence": 0.9,
+      "decided_by": "prompt"
+    }
+  ]
+}

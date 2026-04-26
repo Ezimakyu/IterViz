@@ -7,12 +7,12 @@ must be deterministic).
 Provider selection (in priority order):
 1. Explicit `provider=` argument.
 2. `GLASSHOUSE_LLM_PROVIDER` env var (`openai` or `anthropic`).
-3. `OPENAI_API_KEY` present  -> openai.
-4. `ANTHROPIC_API_KEY` present -> anthropic.
+3. `ANTHROPIC_API_KEY` present -> anthropic (M3 demo target).
+4. `OPENAI_API_KEY` present    -> openai.
 
 Models:
-- openai default: `gpt-4o-mini` (fast, cheap, good at structured output).
-- anthropic default: `claude-3-5-sonnet-latest`.
+- anthropic default: `claude-opus-4-5` (M3 demo target).
+- openai default: `gpt-4o`.
 - Override via `GLASSHOUSE_COMPILER_MODEL`.
 """
 
@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from getpass import getpass
 from pathlib import Path
 from typing import Any, Optional, Type, TypeVar
 
@@ -35,6 +36,10 @@ log = get_logger(__name__)
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "compiler.md"
 
+# M3 demo target: Anthropic Claude Opus 4.5 is the headline model.
+DEFAULT_PROVIDER = "anthropic"
+DEFAULT_MODEL = "claude-opus-4-5"
+
 DEFAULT_MODELS = {
     # M1 eval results on the 8-contract seed set:
     #   gpt-4o-mini           recall 72.73% / precision 61.54%  (FAILS targets)
@@ -42,8 +47,67 @@ DEFAULT_MODELS = {
     #   claude-opus-4-5       recall 100%   / precision 100%    (demo model)
     # Override via GLASSHOUSE_COMPILER_MODEL when tuning.
     "openai": "gpt-4o",
-    "anthropic": "claude-opus-4-5",
+    "anthropic": DEFAULT_MODEL,
 }
+
+
+def ensure_api_key(provider: Optional[str] = None) -> str:
+    """Ensure the chosen provider's API key is set, prompting the user if not.
+
+    M3 ships with Anthropic / Claude Opus 4.5 as the default. If the
+    relevant env var is missing AND we have an interactive TTY, prompt the
+    user. Otherwise, raise so server-side callers fail fast.
+
+    Returns the API key string. Side-effect: sets ``os.environ`` so
+    subsequent SDK calls pick it up.
+    """
+    provider = (provider or DEFAULT_PROVIDER).lower()
+    var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+    url = (
+        "https://console.anthropic.com/settings/keys"
+        if provider == "anthropic"
+        else "https://platform.openai.com/api-keys"
+    )
+
+    key = os.getenv(var)
+    if key:
+        return key
+
+    # Non-interactive contexts (CI, FastAPI workers): fail loudly instead of
+    # blocking on input(). Callers should catch and surface to the user.
+    if not _is_interactive():
+        raise RuntimeError(
+            f"{var} not set and no interactive TTY available to prompt."
+        )
+
+    print("\n" + "=" * 60)
+    print(f"{var} not found in environment.")
+    print(f"Get your API key from: {url}")
+    print("=" * 60 + "\n")
+
+    key = getpass(f"Enter your {provider.title()} API key: ").strip()
+    if not key:
+        raise RuntimeError(f"No {var} provided.")
+
+    save = input("Save to backend/.env file? (y/n): ").strip().lower()
+    if save == "y":
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        with env_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n{var}={key}\n")
+        print(f"Saved to {env_path}")
+
+    os.environ[var] = key
+    return key
+
+
+def _is_interactive() -> bool:
+    """True iff stdin is attached to a TTY."""
+    try:
+        import sys
+
+        return sys.stdin is not None and sys.stdin.isatty()
+    except Exception:  # pragma: no cover - defensive
+        return False
 
 
 def _load_compiler_prompt() -> str:
@@ -56,13 +120,14 @@ def _resolve_provider(explicit: Optional[str]) -> str:
     env_provider = os.getenv("GLASSHOUSE_LLM_PROVIDER")
     if env_provider:
         return env_provider.lower()
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
+    # M3 default: prefer Anthropic / Claude Opus 4.5 if its key is present.
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
+    if os.getenv("OPENAI_API_KEY"):
+        return "openai"
     raise RuntimeError(
         "No LLM provider configured. Set GLASSHOUSE_LLM_PROVIDER and the "
-        "matching API key (OPENAI_API_KEY or ANTHROPIC_API_KEY)."
+        "matching API key (ANTHROPIC_API_KEY or OPENAI_API_KEY)."
     )
 
 
@@ -234,4 +299,11 @@ def call_structured(
     return result
 
 
-__all__ = ["call_compiler", "call_structured", "load_prompt"]
+__all__ = [
+    "call_compiler",
+    "call_structured",
+    "load_prompt",
+    "ensure_api_key",
+    "DEFAULT_PROVIDER",
+    "DEFAULT_MODEL",
+]

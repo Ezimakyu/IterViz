@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import contract as contract_svc
+from . import llm as llm_svc
 from .api import router as api_router
 from .logger import get_logger
 
@@ -26,6 +27,15 @@ DEFAULT_CORS_ORIGINS = [
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     contract_svc.init_db()
     log.info("app.startup", extra={"db_path": str(contract_svc.get_db_path())})
+
+    # M3: prompt for the Anthropic key if running in an interactive TTY,
+    # otherwise just log a warning so deployment / test harnesses keep
+    # working even when no key is configured.
+    try:
+        llm_svc.ensure_api_key(llm_svc.DEFAULT_PROVIDER)
+    except RuntimeError as exc:
+        log.warning("app.startup.no_llm_key", extra={"reason": str(exc)})
+
     try:
         yield
     finally:

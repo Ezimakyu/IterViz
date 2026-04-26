@@ -26,6 +26,7 @@ import json
 import os
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +36,13 @@ import jsonschema
 from pydantic import ValidationError
 
 from .logger import get_logger
-from .schemas import Contract
+from .schemas import (
+    CompilerOutput,
+    Contract,
+    Decision,
+    Verdict,
+    VerificationLogEntry,
+)
 
 log = get_logger(__name__)
 
@@ -313,6 +320,71 @@ def update_contract(session_id: str, contract: Contract) -> Session:
         status=contract.meta.status,
         contract=contract,
     )
+
+
+def add_decision(session_id: str, decision: Decision) -> Session:
+    """Append a Decision to the session's contract and persist it."""
+    session = get_session(session_id)
+    contract = session.contract
+    if contract.decisions is None:  # defensive; default_factory should populate
+        contract.decisions = []
+    # Avoid duplicates by id.
+    if any(d.id == decision.id for d in contract.decisions):
+        log.debug(
+            "contract.add_decision.duplicate",
+            extra={"session_id": session_id, "decision_id": decision.id},
+        )
+        return session
+    contract.decisions.append(decision)
+    log.info(
+        "contract.add_decision",
+        extra={
+            "session_id": session_id,
+            "decision_id": decision.id,
+            "affects_count": len(decision.affects or []),
+        },
+    )
+    return update_contract(session_id, contract)
+
+
+def add_verification_run(
+    session_id: str, compiler_output: CompilerOutput
+) -> Session:
+    """Append a VerificationLogEntry derived from a CompilerOutput."""
+    session = get_session(session_id)
+    contract = session.contract
+    entry = VerificationLogEntry(
+        id=str(uuid.uuid4()),
+        run_at=datetime.now(timezone.utc),
+        verdict=(
+            Verdict.PASS
+            if (compiler_output.verdict == Verdict.PASS.value
+                or compiler_output.verdict == Verdict.PASS)
+            else Verdict.FAIL
+        ),
+        violations=list(compiler_output.violations),
+        questions=list(compiler_output.questions),
+        intent_guess=compiler_output.intent_guess or "",
+        uvdc_score=float(compiler_output.uvdc_score or 0.0),
+    )
+    if contract.verification_log is None:
+        contract.verification_log = []
+    contract.verification_log.append(entry)
+    log.info(
+        "contract.add_verification_run",
+        extra={
+            "session_id": session_id,
+            "verdict": (
+                entry.verdict.value
+                if hasattr(entry.verdict, "value")
+                else entry.verdict
+            ),
+            "violation_count": len(entry.violations),
+            "question_count": len(entry.questions),
+            "uvdc_score": entry.uvdc_score,
+        },
+    )
+    return update_contract(session_id, contract)
 
 
 def list_sessions() -> list[Session]:

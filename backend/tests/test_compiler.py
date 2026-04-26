@@ -340,3 +340,137 @@ def test_verify_contract_no_llm_dirty_contract_fails():
         for v in out.violations
     )
     assert len(out.questions) <= MAX_QUESTIONS
+
+
+# ---------------------------------------------------------------------------
+# M4: Provenance-aware verification
+# ---------------------------------------------------------------------------
+
+
+class TestProvenanceAwareVerification:
+    """The Compiler must honour ``decided_by: user`` — once a user signs
+    off on a node/edge it should not be re-flagged as a provenance issue,
+    and its load-bearing assumptions should not surface as questions
+    even if they're internally still tagged as ``agent``.
+    """
+
+    def test_user_decided_node_skips_provenance_violations(self):
+        a = _node(name="A", decided_by=DecidedBy.USER)
+        b = _node(name="B", decided_by=DecidedBy.PROMPT)
+        # Even though this load-bearing assumption is decided_by=agent,
+        # the node is user-decided so we should not flag it.
+        a.assumptions = [
+            Assumption(
+                text="React + Vite",
+                confidence=0.5,
+                decided_by=DecidedBy.AGENT,
+                load_bearing=True,
+            )
+        ]
+        contract = _contract([a, b], [_edge(a, b)])
+        out = verify_contract(contract, use_llm=False)
+
+        provenance_violations = [
+            v
+            for v in out.violations
+            if v.type == ViolationType.PROVENANCE.value
+        ]
+        assert not any(
+            a.id in (v.affects or []) for v in provenance_violations
+        )
+
+    def test_agent_decided_node_still_generates_provenance_violation(self):
+        a = _node(name="A", decided_by=DecidedBy.AGENT)
+        b = _node(name="B", decided_by=DecidedBy.PROMPT)
+        contract = _contract([a, b], [_edge(a, b, decided_by=DecidedBy.PROMPT)])
+        out = verify_contract(contract, use_llm=False)
+
+        provenance_violations = [
+            v
+            for v in out.violations
+            if v.type == ViolationType.PROVENANCE.value
+        ]
+        assert any(
+            a.id in (v.affects or []) for v in provenance_violations
+        )
+
+    def test_user_decided_node_silences_inv007_for_agent_assumptions(self):
+        # Load-bearing agent assumption on a user-decided node should NOT
+        # trigger INV-007 — the user has signed off on the node.
+        agent_assumption = Assumption(
+            text="Stripe is the payments processor",
+            confidence=0.6,
+            decided_by=DecidedBy.AGENT,
+            load_bearing=True,
+        )
+        user_node = _node(
+            name="UserOwned",
+            decided_by=DecidedBy.USER,
+            assumptions=[agent_assumption],
+        )
+        b = _node(name="B")
+        contract = _contract([user_node, b], [_edge(user_node, b)])
+
+        violations = check_inv007_dangling_assumptions(contract)
+        assert not any(
+            user_node.id in (v.affects or []) for v in violations
+        )
+
+    def test_uvdc_user_decided_counts_as_covered(self):
+        a = _node(name="A", decided_by=DecidedBy.USER)
+        b = _node(name="B", decided_by=DecidedBy.USER)
+        edge = _edge(a, b, decided_by=DecidedBy.USER)
+        contract = _contract([a, b], [edge])
+        assert compute_uvdc(contract) == 1.0
+
+    def test_uvdc_increases_when_node_flips_to_user(self):
+        a = _node(name="A", decided_by=DecidedBy.AGENT)
+        b = _node(name="B", decided_by=DecidedBy.AGENT)
+        edge = _edge(a, b, decided_by=DecidedBy.AGENT)
+        contract = _contract([a, b], [edge])
+        before = compute_uvdc(contract)
+
+        a.decided_by = DecidedBy.USER
+        after = compute_uvdc(contract)
+
+        assert after > before
+
+    def test_uvdc_mixed_user_prompt_agent(self):
+        # 2 of 3 (user + prompt) covered; 1 of 3 (agent) uncovered.
+        a = _node(name="A", decided_by=DecidedBy.USER)
+        b = _node(name="B", decided_by=DecidedBy.PROMPT)
+        c = _node(name="C", decided_by=DecidedBy.AGENT)
+        contract = _contract([a, b, c], [_edge(a, b), _edge(b, c)])
+        # 5 load-bearing fields total: 3 nodes + 2 edges (decided_by=PROMPT
+        # by default) → 4/5 covered.
+        score = compute_uvdc(contract)
+        assert 0.5 < score < 1.0
+
+    def test_no_questions_for_user_decided_load_bearing_assumption(self):
+        # Both assumption AND node decided_by=user: nothing to ask.
+        a = _node(
+            name="A",
+            decided_by=DecidedBy.USER,
+            assumptions=[
+                Assumption(
+                    text="user-confirmed",
+                    confidence=0.9,
+                    decided_by=DecidedBy.USER,
+                    load_bearing=True,
+                )
+            ],
+        )
+        b = _node(name="B", decided_by=DecidedBy.USER)
+        contract = _contract([a, b], [_edge(a, b, decided_by=DecidedBy.USER)])
+        out = verify_contract(contract, use_llm=False)
+
+        provenance_qs = [
+            q
+            for q in out.questions
+            if a.id in q or "user-confirmed" in q
+        ]
+        assert provenance_qs == []
+        assert all(
+            v.type != ViolationType.PROVENANCE.value
+            for v in out.violations
+        )

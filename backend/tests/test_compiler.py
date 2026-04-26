@@ -446,6 +446,28 @@ class TestProvenanceAwareVerification:
         score = compute_uvdc(contract)
         assert 0.5 < score < 1.0
 
+    def test_verify_contract_works_at_debug_log_level(self):
+        # Regression: a previous version of `verify_contract` emitted
+        # ``log.debug("compiler.node_provenance_detail", extra={"name": ...})``,
+        # which collided with ``LogRecord.name`` and raised KeyError under
+        # ``DEBUG=1``. Make sure we can run the full deterministic pass at
+        # DEBUG without that crash recurring.
+        import logging
+
+        from app import compiler as compiler_mod
+
+        a = _node(name="A", decided_by=DecidedBy.PROMPT)
+        b = _node(name="B", decided_by=DecidedBy.PROMPT)
+        contract = _contract([a, b], [_edge(a, b)])
+
+        prev_level = compiler_mod.log.level
+        compiler_mod.log.setLevel(logging.DEBUG)
+        try:
+            out = verify_contract(contract, use_llm=False)
+        finally:
+            compiler_mod.log.setLevel(prev_level)
+        assert out is not None
+
     def test_no_questions_for_user_decided_load_bearing_assumption(self):
         # Both assumption AND node decided_by=user: nothing to ask.
         a = _node(

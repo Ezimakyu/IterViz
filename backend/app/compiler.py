@@ -792,7 +792,7 @@ def verify_contract(
             "compiler.node_provenance_detail",
             extra={
                 "node_id": node.id,
-                "name": node.name,
+                "node_name": node.name,
                 "decided_by": _enum_value(node.decided_by),
                 "load_bearing_assumptions": sum(
                     1 for a in node.assumptions if a.load_bearing

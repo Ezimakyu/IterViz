@@ -107,36 +107,54 @@ def get_assignment_for_node(
     return None
 
 
+def _find_by_node_locked(
+    session_id: str, node_id: str
+) -> Optional[Assignment]:
+    """Internal helper: look up an assignment by ``node_id``.
+
+    Caller MUST be holding ``_lock``.
+    """
+    for assignment in _assignments.get(session_id, {}).values():
+        if assignment.node_id == node_id:
+            return assignment
+    return None
+
+
 def claim_assignment(
     session_id: str, node_id: str, agent_id: str
 ) -> Optional[Assignment]:
     """Claim a pending assignment for an agent.
 
+    The lookup, status check, and mutation all happen under ``_lock``
+    so two concurrent claimers cannot both observe a PENDING assignment
+    and double-claim it.
+
     Returns ``None`` if the assignment doesn't exist or has already been
     claimed by another agent.
     """
-    assignment = get_assignment_for_node(session_id, node_id)
-    if assignment is None:
-        log.warning(
-            "assignments.claim_failed_not_found",
-            extra={"session_id": session_id, "node_id": node_id},
-        )
-        return None
+    with _lock:
+        assignment = _find_by_node_locked(session_id, node_id)
+        if assignment is None:
+            log.warning(
+                "assignments.claim_failed_not_found",
+                extra={"session_id": session_id, "node_id": node_id},
+            )
+            return None
 
-    if assignment.status != AssignmentStatus.PENDING:
-        log.warning(
-            "assignments.claim_failed_not_available",
-            extra={
-                "assignment_id": assignment.id,
-                "current_status": assignment.status,
-                "current_agent": assignment.assigned_to,
-            },
-        )
-        return None
+        if assignment.status != AssignmentStatus.PENDING:
+            log.warning(
+                "assignments.claim_failed_not_available",
+                extra={
+                    "assignment_id": assignment.id,
+                    "current_status": assignment.status,
+                    "current_agent": assignment.assigned_to,
+                },
+            )
+            return None
 
-    assignment.assigned_to = agent_id
-    assignment.assigned_at = datetime.utcnow()
-    assignment.status = AssignmentStatus.IN_PROGRESS
+        assignment.assigned_to = agent_id
+        assignment.assigned_at = datetime.utcnow()
+        assignment.status = AssignmentStatus.IN_PROGRESS
 
     log.info(
         "assignments.claimed",
@@ -163,33 +181,34 @@ def complete_assignment(
     Returns ``None`` when the assignment is missing or claimed by a
     different agent than the one submitting.
     """
-    assignment = get_assignment_for_node(session_id, node_id)
-    if assignment is None:
-        return None
+    with _lock:
+        assignment = _find_by_node_locked(session_id, node_id)
+        if assignment is None:
+            return None
 
-    if assignment.assigned_to != agent_id:
-        log.warning(
-            "assignments.complete_wrong_agent",
-            extra={
-                "assignment_id": assignment.id,
-                "expected_agent": assignment.assigned_to,
-                "actual_agent": agent_id,
-            },
-        )
-        return None
+        if assignment.assigned_to != agent_id:
+            log.warning(
+                "assignments.complete_wrong_agent",
+                extra={
+                    "assignment_id": assignment.id,
+                    "expected_agent": assignment.assigned_to,
+                    "actual_agent": agent_id,
+                },
+            )
+            return None
 
-    now = datetime.utcnow()
-    assignment.status = AssignmentStatus.COMPLETED
-    assignment.result = AssignmentResult(
-        implementation=Implementation(
-            file_paths=list(file_paths),
-            notes=notes,
-            actual_interface=actual_interface,
+        now = datetime.utcnow()
+        assignment.status = AssignmentStatus.COMPLETED
+        assignment.result = AssignmentResult(
+            implementation=Implementation(
+                file_paths=list(file_paths),
+                notes=notes,
+                actual_interface=actual_interface,
+                completed_at=now,
+            ),
             completed_at=now,
-        ),
-        completed_at=now,
-        duration_ms=duration_ms,
-    )
+            duration_ms=duration_ms,
+        )
 
     log.info(
         "assignments.completed",
@@ -207,13 +226,14 @@ def release_assignment(
     session_id: str, node_id: str, agent_id: str
 ) -> Optional[Assignment]:
     """Release a claimed assignment so other agents can pick it up."""
-    assignment = get_assignment_for_node(session_id, node_id)
-    if assignment is None or assignment.assigned_to != agent_id:
-        return None
+    with _lock:
+        assignment = _find_by_node_locked(session_id, node_id)
+        if assignment is None or assignment.assigned_to != agent_id:
+            return None
 
-    assignment.assigned_to = None
-    assignment.assigned_at = None
-    assignment.status = AssignmentStatus.PENDING
+        assignment.assigned_to = None
+        assignment.assigned_at = None
+        assignment.status = AssignmentStatus.PENDING
 
     log.info(
         "assignments.released",
@@ -230,9 +250,11 @@ def fail_assignment(
     session_id: str, node_id: str
 ) -> Optional[Assignment]:
     """Mark an assignment as failed (used by the internal orchestrator)."""
-    assignment = get_assignment_for_node(session_id, node_id)
+    with _lock:
+        assignment = _find_by_node_locked(session_id, node_id)
+        if assignment is not None:
+            assignment.status = AssignmentStatus.FAILED
     if assignment is not None:
-        assignment.status = AssignmentStatus.FAILED
         log.warning(
             "assignments.failed",
             extra={"assignment_id": assignment.id, "node_id": node_id},

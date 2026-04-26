@@ -276,8 +276,25 @@ async def run_implementation_internal(session_id: str) -> None:
     nodes_implemented = 0
     nodes_failed = 0
 
+    internal_agent_id = "internal"
+
     for assignment in pending_assignments:
         node = assignment.payload.node
+
+        # Claim the assignment for the internal agent so the lifecycle
+        # transitions PENDING -> IN_PROGRESS -> COMPLETED are tracked
+        # consistently with the assignments module's invariants.
+        claimed = assignments_svc.claim_assignment(
+            session_id, node.id, internal_agent_id
+        )
+        if claimed is None:
+            # Already claimed/completed by another agent; skip but keep
+            # the loop running for the rest.
+            log.warning(
+                "orchestrator.internal_claim_failed",
+                extra={"session_id": session_id, "node_id": node.id},
+            )
+            continue
 
         await ws.broadcast_node_status_changed(
             session_id, node.id, NodeStatus.IN_PROGRESS
@@ -301,8 +318,11 @@ async def run_implementation_internal(session_id: str) -> None:
 
             file_paths: list[str] = []
             for i, content in enumerate(impl.get("files", [])):
-                filename = content.get("filename") or f"file_{i}.py"
-                file_path = output_dir / filename
+                raw_name = content.get("filename") or f"file_{i}.py"
+                # Strip directory components to defeat path-traversal
+                # attempts in LLM-supplied filenames (e.g. "../etc/x").
+                safe_name = Path(str(raw_name)).name or f"file_{i}.py"
+                file_path = output_dir / safe_name
                 file_path.write_text(content.get("content", ""))
                 file_paths.append(str(file_path))
 
@@ -315,7 +335,7 @@ async def run_implementation_internal(session_id: str) -> None:
             assignments_svc.complete_assignment(
                 session_id=session_id,
                 node_id=node.id,
-                agent_id=assignment.assigned_to or "internal",
+                agent_id=internal_agent_id,
                 file_paths=file_paths,
                 actual_interface=actual_interface,
                 notes=impl.get("notes"),

@@ -156,3 +156,69 @@ def test_identify_leaf_nodes_ignores_event_edges() -> None:
 
     # Event-only outflows should not disqualify ``a`` from being a leaf.
     assert {n.id for n in leaves} == {"a", "b"}
+
+
+# ---------------------------------------------------------------------------
+# M5 review-driven regression tests
+# ---------------------------------------------------------------------------
+
+
+import asyncio
+from pathlib import Path
+
+import pytest as _pt
+
+from app import assignments as _assignments_svc
+from app.schemas import AssignmentStatus
+
+
+def test_internal_run_marks_assignments_completed(
+    session: str, tmp_path, monkeypatch
+) -> None:
+    """run_implementation_internal must claim before completing.
+
+    Regression: previously the orchestrator never claimed assignments,
+    so complete_assignment silently failed and assignments stayed in
+    PENDING forever (and get_available_assignments kept returning
+    already-implemented nodes).
+    """
+    orchestrator.set_generated_dir(tmp_path / "gen")
+
+    # Mock the subagent to avoid LLM calls; return a malicious filename
+    # to simultaneously regress the path-traversal fix.
+    async def _fake_subagent(assignment):
+        return {
+            "files": [
+                {"filename": "../../etc/evil.py", "content": "x"},
+                {"filename": "ok.py", "content": "y"},
+            ],
+            "exports": [],
+            "imports": [],
+            "public_functions": [],
+            "notes": "test",
+        }
+
+    monkeypatch.setattr(orchestrator, "_run_subagent", _fake_subagent)
+
+    orchestrator.freeze_contract(session)
+    orchestrator.create_assignments(session)
+
+    asyncio.get_event_loop().run_until_complete(
+        orchestrator.run_implementation_internal(session)
+    )
+
+    after = _assignments_svc.get_assignments_for_session(session)
+    assert all(
+        a.status == AssignmentStatus.COMPLETED.value for a in after
+    ), [a.status for a in after]
+
+    # Path-traversal regression: every written file must live under the
+    # configured generated dir; the malicious "../../" path must have
+    # been stripped to "evil.py" and stayed inside the session/node dir.
+    gen_root = (tmp_path / "gen").resolve()
+    for a in after:
+        for fp in a.result.implementation.file_paths:
+            resolved = Path(fp).resolve()
+            assert str(resolved).startswith(str(gen_root)), resolved
+
+    orchestrator.set_generated_dir(None)

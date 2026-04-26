@@ -20,6 +20,8 @@
     "@types/dagre": "^0.7.52",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.17",
     "eslint": "^8.56.0",

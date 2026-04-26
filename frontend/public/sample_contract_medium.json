@@ -1,0 +1,351 @@
+{
+  "meta": {
+    "id": "medium-web-app",
+    "version": 1,
+    "status": "drafting",
+    "stated_intent": "A web app with email/password auth, a Postgres database, and an external payments API."
+  },
+  "nodes": [
+    {
+      "id": "n-web",
+      "name": "Web UI",
+      "kind": "ui",
+      "description": "React SPA served as static assets.",
+      "responsibilities": ["Render pages", "Call REST API", "Handle auth tokens"],
+      "assumptions": [
+        {
+          "text": "Browsers support ES2020.",
+          "confidence": 0.95,
+          "decided_by": "prompt",
+          "load_bearing": false
+        }
+      ],
+      "confidence": 0.9,
+      "decided_by": "prompt",
+      "status": "drafted"
+    },
+    {
+      "id": "n-api",
+      "name": "REST API",
+      "kind": "service",
+      "description": "FastAPI backend exposing /auth, /orders, /users.",
+      "responsibilities": [
+        "Validate requests",
+        "Issue JWTs",
+        "Persist orders",
+        "Call payments provider"
+      ],
+      "assumptions": [
+        {
+          "text": "JWT secret is rotated quarterly.",
+          "confidence": 0.5,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.78,
+      "open_questions": ["Use refresh tokens or just short-lived access?"],
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-auth",
+      "name": "Auth Service",
+      "kind": "service",
+      "description": "Password hashing, login, signup, password reset emails.",
+      "responsibilities": ["bcrypt hashing", "Send reset emails", "Issue JWTs"],
+      "assumptions": [
+        {
+          "text": "Argon2 is overkill for the demo; bcrypt is fine.",
+          "confidence": 0.55,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.6,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-db",
+      "name": "Postgres",
+      "kind": "store",
+      "description": "Primary relational store for users, orders, sessions.",
+      "responsibilities": ["Persist users/orders", "Enforce constraints"],
+      "assumptions": [
+        {
+          "text": "Single primary, no replicas in M0.",
+          "confidence": 0.85,
+          "decided_by": "prompt",
+          "load_bearing": false
+        }
+      ],
+      "confidence": 0.88,
+      "decided_by": "prompt",
+      "status": "drafted"
+    },
+    {
+      "id": "n-cache",
+      "name": "Redis",
+      "kind": "store",
+      "description": "Rate-limit counters and short-lived session blacklist.",
+      "responsibilities": ["Track per-IP request counts", "Hold revoked JWTs"],
+      "assumptions": [
+        {
+          "text": "5-minute TTL is enough for blacklist.",
+          "confidence": 0.4,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.45,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-payments",
+      "name": "Stripe API",
+      "kind": "external",
+      "description": "Third-party payments provider.",
+      "responsibilities": ["Charge cards", "Send webhooks"],
+      "assumptions": [
+        {
+          "text": "Stripe webhooks are reachable from our VPC.",
+          "confidence": 0.7,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.75,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-email",
+      "name": "Email Provider",
+      "kind": "external",
+      "description": "Transactional email service (e.g., Postmark).",
+      "responsibilities": ["Deliver password reset emails"],
+      "assumptions": [
+        {
+          "text": "Domain SPF/DKIM is preconfigured.",
+          "confidence": 0.6,
+          "decided_by": "agent",
+          "load_bearing": false
+        }
+      ],
+      "confidence": 0.65,
+      "decided_by": "agent",
+      "status": "drafted"
+    },
+    {
+      "id": "n-worker",
+      "name": "Background Worker",
+      "kind": "job",
+      "description": "Processes Stripe webhooks asynchronously.",
+      "responsibilities": ["Consume webhook queue", "Update order status"],
+      "assumptions": [
+        {
+          "text": "Webhook retries up to 3 times on failure.",
+          "confidence": 0.5,
+          "decided_by": "agent",
+          "load_bearing": true
+        }
+      ],
+      "confidence": 0.55,
+      "decided_by": "agent",
+      "status": "drafted"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-web-api",
+      "source": "n-web",
+      "target": "n-api",
+      "kind": "data",
+      "label": "REST calls",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "method": { "type": "string" },
+          "path": { "type": "string" },
+          "body": { "type": "object" }
+        },
+        "required": ["method", "path"]
+      },
+      "confidence": 0.9,
+      "decided_by": "prompt"
+    },
+    {
+      "id": "e-api-auth",
+      "source": "n-api",
+      "target": "n-auth",
+      "kind": "control",
+      "label": "delegate auth",
+      "payload_schema": null,
+      "confidence": 0.85,
+      "decided_by": "prompt"
+    },
+    {
+      "id": "e-auth-db",
+      "source": "n-auth",
+      "target": "n-db",
+      "kind": "data",
+      "label": "users / sessions",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "string" },
+          "password_hash": { "type": "string" }
+        },
+        "required": ["user_id"]
+      },
+      "confidence": 0.8,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-api-db",
+      "source": "n-api",
+      "target": "n-db",
+      "kind": "data",
+      "label": "orders",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "order_id": { "type": "string" },
+          "user_id": { "type": "string" },
+          "amount_cents": { "type": "integer" },
+          "status": { "type": "string" }
+        },
+        "required": ["order_id", "user_id", "amount_cents"]
+      },
+      "confidence": 0.82,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-api-cache",
+      "source": "n-api",
+      "target": "n-cache",
+      "kind": "data",
+      "label": "rate limiter",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "ip": { "type": "string" },
+          "count": { "type": "integer" }
+        },
+        "required": ["ip"]
+      },
+      "confidence": 0.7,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-auth-email",
+      "source": "n-auth",
+      "target": "n-email",
+      "kind": "event",
+      "label": "send reset email",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string" },
+          "template": { "type": "string" },
+          "vars": { "type": "object" }
+        },
+        "required": ["to", "template"]
+      },
+      "confidence": 0.7,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-api-payments",
+      "source": "n-api",
+      "target": "n-payments",
+      "kind": "data",
+      "label": "create charge",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "amount_cents": { "type": "integer" },
+          "currency": { "type": "string" },
+          "source": { "type": "string" }
+        },
+        "required": ["amount_cents", "currency", "source"]
+      },
+      "confidence": 0.78,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-payments-worker",
+      "source": "n-payments",
+      "target": "n-worker",
+      "kind": "event",
+      "label": "webhook",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string" },
+          "order_id": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "required": ["event", "order_id"]
+      },
+      "confidence": 0.65,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-worker-db",
+      "source": "n-worker",
+      "target": "n-db",
+      "kind": "data",
+      "label": "update order",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "order_id": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "required": ["order_id", "status"]
+      },
+      "confidence": 0.7,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-api-worker",
+      "source": "n-api",
+      "target": "n-worker",
+      "kind": "dependency",
+      "label": "queue producer",
+      "payload_schema": null,
+      "confidence": 0.6,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-auth-cache",
+      "source": "n-auth",
+      "target": "n-cache",
+      "kind": "data",
+      "label": "revoke jwt",
+      "payload_schema": {
+        "type": "object",
+        "properties": {
+          "jti": { "type": "string" },
+          "exp": { "type": "integer" }
+        },
+        "required": ["jti"]
+      },
+      "confidence": 0.5,
+      "decided_by": "agent"
+    },
+    {
+      "id": "e-web-auth",
+      "source": "n-web",
+      "target": "n-auth",
+      "kind": "control",
+      "label": "login form",
+      "payload_schema": null,
+      "confidence": 0.7,
+      "decided_by": "prompt"
+    }
+  ]
+}

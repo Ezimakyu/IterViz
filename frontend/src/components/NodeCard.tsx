@@ -1,8 +1,13 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { ContractNode } from "../types/contract";
-import { NODE_HEIGHT, NODE_WIDTH } from "../utils/layout";
 import { useContractStore } from "../state/contract";
+import { type Tier, TIER_SIZE } from "../utils/hierarchy";
+
+export interface NodeCardData {
+  node: ContractNode;
+  tier: Tier;
+}
 
 const KIND_RING: Record<ContractNode["kind"], string> = {
   service: "ring-sky-400/60",
@@ -13,29 +18,47 @@ const KIND_RING: Record<ContractNode["kind"], string> = {
   interface: "ring-slate-300/60",
 };
 
+const TIER_TEXT_SIZE: Record<Tier, string> = {
+  core: "text-[15px]",
+  feature: "text-sm",
+  child: "text-[11px]",
+  orphan: "text-[11px]",
+};
+
+const TIER_RING_WIDTH: Record<Tier, string> = {
+  core: "ring-[3px]",
+  feature: "ring-2",
+  child: "ring-1",
+  orphan: "ring-1",
+};
+
 function confidenceColor(confidence: number): string {
   if (confidence < 0.5) return "bg-red-500";
   if (confidence < 0.8) return "bg-yellow-400";
   return "bg-green-500";
 }
 
-function NodeCardImpl({ id, data, selected }: NodeProps<ContractNode>) {
-  const node = data;
+function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
+  const { node, tier } = data;
   const confidencePct = Math.round(node.confidence * 100);
   const selectedNodeId = useContractStore((s) => s.selectedNodeId);
   const isSpotlight = selectedNodeId === id;
+  const size = TIER_SIZE[tier];
 
   return (
     <div
       className={[
-        "relative flex flex-col justify-center rounded-full border bg-slate-100 px-5 py-2 text-slate-900 shadow-md ring-2 transition",
+        "relative flex flex-col justify-center rounded-full border bg-slate-100 text-slate-900 shadow-md transition",
+        tier === "child" || tier === "orphan" ? "px-3 py-1.5" : "px-5 py-2",
         KIND_RING[node.kind],
+        TIER_RING_WIDTH[tier],
         selected || isSpotlight
           ? "border-sky-500 shadow-sky-500/30"
           : "border-slate-400",
       ].join(" ")}
-      style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
+      style={{ width: size.width, height: size.height }}
       data-testid={`node-card-${node.id}`}
+      data-tier={tier}
       title={node.description ?? node.name}
     >
       {/* Invisible centered handles — floating edges ignore side. */}
@@ -51,7 +74,9 @@ function NodeCardImpl({ id, data, selected }: NodeProps<ContractNode>) {
       />
 
       <div className="flex items-center justify-center">
-        <h3 className="truncate text-sm font-semibold leading-tight text-center">
+        <h3
+          className={`truncate text-center font-semibold leading-tight ${TIER_TEXT_SIZE[tier]}`}
+        >
           {node.name}
         </h3>
       </div>

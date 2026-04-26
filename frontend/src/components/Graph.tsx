@@ -3,9 +3,7 @@ import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
-  MiniMap,
   ReactFlowProvider,
-  type Edge,
   type EdgeMouseHandler,
   type EdgeTypes,
   type NodeMouseHandler,
@@ -14,11 +12,12 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import type { Contract } from "../types/contract";
 import { NodeCard } from "./NodeCard";
-import { EdgeLabel, type EdgeData } from "./EdgeLabel";
+import { EdgeLabel } from "./EdgeLabel";
 import { NodeDetailsPopup } from "./NodeDetailsPopup";
 import { EdgeDetailsPopup } from "./EdgeDetailsPopup";
 import { useForceLayout } from "../hooks/useForceLayout";
 import { useContractStore } from "../state/contract";
+import { buildHierarchy } from "../utils/hierarchy";
 
 const nodeTypes: NodeTypes = { oval: NodeCard };
 const edgeTypes: EdgeTypes = { floating: EdgeLabel };
@@ -44,22 +43,13 @@ function GraphInner({ contract }: GraphProps) {
     clearSelection,
   } = useContractStore();
 
-  const defaultEdges = useMemo<Edge<EdgeData>[]>(
-    () =>
-      contract.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: "floating",
-        data: { edge: e },
-      })),
-    [contract],
-  );
+  const hierarchy = useMemo(() => buildHierarchy(contract), [contract]);
 
   // Uncontrolled React Flow: the force simulation drives node positions
   // via `useReactFlow().setNodes`, so we don't own node state here.
   useForceLayout(contract, {
     boostedId: selectedNodeId ?? null,
+    hierarchy,
   });
 
   const onNodeClick: NodeMouseHandler = (event, node) => {
@@ -92,9 +82,8 @@ function GraphInner({ contract }: GraphProps) {
   return (
     <div className="relative h-full w-full">
       <ReactFlow
-        key={contract.meta?.id ?? `${contract.nodes.length}:${contract.edges.length}`}
         defaultNodes={[]}
-        defaultEdges={defaultEdges}
+        defaultEdges={[]}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={clearSelection}
@@ -115,12 +104,6 @@ function GraphInner({ contract }: GraphProps) {
           color="#1f2540"
         />
         <Controls position="bottom-left" showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor="#cbd5e1"
-          maskColor="rgba(11, 16, 32, 0.7)"
-        />
       </ReactFlow>
 
       {selectedNode && (

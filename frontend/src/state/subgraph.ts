@@ -26,6 +26,9 @@ interface SubgraphStore {
   // ---- subgraph cache ----
   subgraphs: Record<string, ImplementationSubgraph>;
   activeParentNodeId: string | null;
+  
+  // ---- generation tracking ----
+  generatingSubgraphIds: Set<string>;
 
   // ---- popups ----
   popups: PopupState;
@@ -44,6 +47,10 @@ interface SubgraphStore {
   hasSubgraph: (parentNodeId: string) => boolean;
 
   setActiveSubgraph: (parentNodeId: string | null) => void;
+  
+  // ---- generation tracking ----
+  setGenerating: (parentNodeId: string, isGenerating: boolean) => void;
+  isGenerating: (parentNodeId: string) => boolean;
 
   openBigPicturePopup: (nodeId: string) => void;
   closeBigPicturePopup: () => void;
@@ -61,6 +68,7 @@ const initialPopups: PopupState = {
 export const useSubgraphStore = create<SubgraphStore>((set, get) => ({
   subgraphs: {},
   activeParentNodeId: null,
+  generatingSubgraphIds: new Set(),
   popups: { ...initialPopups },
 
   setSubgraph: (parentNodeId, subgraph) =>
@@ -77,6 +85,7 @@ export const useSubgraphStore = create<SubgraphStore>((set, get) => ({
     set({
       subgraphs: {},
       activeParentNodeId: null,
+      generatingSubgraphIds: new Set(),
       popups: { ...initialPopups },
     }),
 
@@ -109,6 +118,19 @@ export const useSubgraphStore = create<SubgraphStore>((set, get) => ({
 
   setActiveSubgraph: (parentNodeId) =>
     set({ activeParentNodeId: parentNodeId }),
+
+  setGenerating: (parentNodeId, isGenerating) =>
+    set((s) => {
+      const next = new Set(s.generatingSubgraphIds);
+      if (isGenerating) {
+        next.add(parentNodeId);
+      } else {
+        next.delete(parentNodeId);
+      }
+      return { generatingSubgraphIds: next };
+    }),
+
+  isGenerating: (parentNodeId) => get().generatingSubgraphIds.has(parentNodeId),
 
   openBigPicturePopup: (nodeId) =>
     set((s) => ({ popups: { ...s.popups, bigPictureNodeId: nodeId } })),

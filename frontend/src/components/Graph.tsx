@@ -56,6 +56,7 @@ function GraphInner({ contract }: GraphProps) {
   const setActiveSubgraph = useSubgraphStore((s) => s.setActiveSubgraph);
   const upsertSubgraph = useSubgraphStore((s) => s.upsertSubgraph);
   const subgraphCache = useSubgraphStore((s) => s.subgraphs);
+  const setGenerating = useSubgraphStore((s) => s.setGenerating);
   // M5's ControlBar already opens the session WebSocket via
   // `useWebSocketStore.connect`; subgraph events are routed by the same
   // store handler -- no extra subscription needed here.
@@ -117,9 +118,12 @@ function GraphInner({ contract }: GraphProps) {
     latestClickRef.current = rfNode.id;
 
     // Left-click enters the implementation subgraph for the node.
-    // Generate it lazily on the first click.
+    // Subgraphs are pre-generated in the background after session creation,
+    // but if one isn't ready yet, generate it on demand.
     if (!subgraphCache[rfNode.id]) {
+      setGenerating(rfNode.id, true);
       const result = await API.generateSubgraph(sessionId, rfNode.id);
+      setGenerating(rfNode.id, false);
       if (latestClickRef.current !== rfNode.id) return;
       if (!isApiError(result)) {
         upsertSubgraph(result.subgraph);

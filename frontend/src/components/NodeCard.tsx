@@ -33,10 +33,30 @@ const TIER_RING_WIDTH: Record<Tier, string> = {
   orphan: "ring-1",
 };
 
-function confidenceColor(confidence: number): string {
-  if (confidence < 0.5) return "bg-red-500";
-  if (confidence < 0.8) return "bg-yellow-400";
-  return "bg-green-500";
+function progressColor(status: ContractNode["status"]): string {
+  switch (status) {
+    case "implemented":
+      return "bg-green-500";
+    case "in_progress":
+      return "bg-yellow-400";
+    case "failed":
+      return "bg-red-500";
+    default:
+      return "bg-slate-400";
+  }
+}
+
+function statusToProgress(status: ContractNode["status"]): number {
+  switch (status) {
+    case "implemented":
+      return 100;
+    case "in_progress":
+      return 50;
+    case "failed":
+      return 100;
+    default:
+      return 0;
+  }
 }
 
 const STATUS_RING: Record<
@@ -51,7 +71,9 @@ const STATUS_RING: Record<
 
 function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const { node, tier } = data;
-  const confidencePct = Math.round(node.confidence * 100);
+  const nodeProgress = useContractStore((s) => s.nodeProgress);
+  const storedProgress = nodeProgress.get(id);
+  const progressPct = storedProgress ?? statusToProgress(node.status);
   const selectedNodeId = useContractStore((s) => s.selectedNodeId);
   const previousContract = useContractStore((s) => s.previousContract);
   const nodeAgents = useContractStore((s) => s.nodeAgents);
@@ -59,6 +81,7 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const provenanceView = useContractStore((s) => s.provenanceView);
   const openBigPicturePopup = useSubgraphStore((s) => s.openBigPicturePopup);
   const hasSubgraph = useSubgraphStore((s) => Boolean(s.subgraphs[id]));
+  const isGeneratingSubgraph = useSubgraphStore((s) => s.generatingSubgraphIds.has(id));
   const isSpotlight = selectedNodeId === id;
   const size = TIER_SIZE[tier];
   const statusRing = STATUS_RING[node.status] ?? "";
@@ -143,11 +166,23 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
         }}
         aria-label={`Show details for ${node.name}`}
         data-testid={`node-info-button-${node.id}`}
-        className="absolute -top-1 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-slate-400 bg-white/80 text-[11px] font-semibold text-slate-700 shadow hover:bg-sky-100 hover:text-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+        className="absolute -top-2 -right-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-400 bg-white text-sm font-bold text-slate-700 shadow-md hover:bg-sky-100 hover:text-sky-700 hover:border-sky-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 transition-colors"
       >
         i
       </button>
-      {hasSubgraph && (
+      {isGeneratingSubgraph && (
+        <span
+          aria-label="Generating subgraph..."
+          data-testid={`node-generating-indicator-${node.id}`}
+          className="absolute -bottom-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-white bg-yellow-400 shadow animate-pulse"
+        >
+          <svg className="h-2.5 w-2.5 animate-spin text-yellow-800" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        </span>
+      )}
+      {hasSubgraph && !isGeneratingSubgraph && (
         <span
           aria-hidden
           data-testid={`node-subgraph-indicator-${node.id}`}
@@ -164,11 +199,11 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
 
       <div
         className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-300"
-        aria-label={`confidence ${confidencePct}%`}
+        aria-label={`progress ${progressPct}%`}
       >
         <div
-          className={`h-full ${confidenceColor(node.confidence)}`}
-          style={{ width: `${confidencePct}%` }}
+          className={`h-full transition-all duration-300 ${progressColor(node.status)}`}
+          style={{ width: `${progressPct}%` }}
         />
       </div>
     </div>

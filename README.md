@@ -1,22 +1,20 @@
 # IterViz
 
-> Visual AI agent orchestrator for software architecture planning — turn a natural language prompt into a verified system design, then watch multiple agents implement it in real-time.
+> Visual AI agent orchestrator for software architecture planning — turn a natural language prompt into a system design, then watch multiple agents implement it in real-time.
 
-IterViz bridges the gap between high-level software ideas and working code. You describe what you want to build, an Architect agent generates a graph-based system design, a Verifier ensures consistency and completeness through developer Q&A, and then multiple agents implement each component while you watch their progress live.
+IterViz bridges the gap between high-level software ideas and working code. You describe what you want to build, an Architect agent generates a graph-based system design, and then you can drill down into each component to see implementation details. Multiple agents can then implement each component while you watch their progress live.
 
 ---
 
 ## Terminology
 
-**Contract:** A graph-based representation of a software system. Contains nodes (components), edges (data/control flow), failure scenarios, and decisions.
+**Contract:** A graph-based representation of a software system. Contains nodes (components), edges (data/control flow), and implementation status.
 
-**Node:** A component in the system — service, store, external API, etc. Has a name, description, responsibilities, confidence score, and implementation status.
+**Node:** A component in the system — service, store, external API, etc. Has a name, description, responsibilities, and implementation status.
 
 **Edge:** A connection between nodes — data flow, control flow, or dependency. Includes payload schema and failure handling.
 
-**Verification:** The Verifier runs multiple passes to check invariants (orphaned nodes, missing payloads, cycles), provenance (who decided what), and failure scenarios.
-
-**UVDC (User-Visible Decision Coverage):** Percentage of load-bearing decisions that have been explicitly confirmed by the user vs. assumed by the agent.
+**Subgraph:** A detailed breakdown of implementation tasks for a single node. Each subgraph contains functions, tests, types, and other artifacts needed to implement the component.
 
 ---
 
@@ -24,31 +22,27 @@ IterViz bridges the gap between high-level software ideas and working code. You 
 
 ```mermaid
 flowchart LR
-    subgraph Phase1 [Phase 1: Planning Loop]
+    subgraph Phase1 [Phase 1: Planning]
         Prompt["Natural Language\nPrompt"] --> Architect["Architect Agent"]
         Architect --> Contract["System Contract\n(Graph)"]
-        Contract --> Verifier["Verifier"]
-        Verifier -->|Questions| Developer["Developer"]
-        Developer -->|Answers| Architect
-        Verifier -->|Passes| Freeze["Freeze Contract"]
+        Contract --> Review["Review &\nExplore"]
     end
     
     subgraph Phase2 [Phase 2: Implementation]
-        Freeze --> Orchestrator["Orchestrator"]
+        Review --> Orchestrator["Orchestrator"]
         Orchestrator --> Agents["Implementation\nAgents"]
         Agents --> Code["Generated Code"]
     end
 ```
 
-**Phase 1 — Planning Loop:**
+**Phase 1 — Planning:**
 1. Enter a prompt like *"Build a Slack bot that summarizes unread DMs daily"*
 2. The Architect agent generates a system graph with nodes (components) and edges (data/control flow)
-3. The Verifier checks for consistency, missing details, and unhandled failures
-4. Answer clarifying questions to refine the design
-5. Iterate until the contract passes verification
+3. Click on any node to see its implementation subgraph — a breakdown of the functions, tests, and types needed
+4. Review the architecture and explore component details
 
 **Phase 2 — Implementation:**
-1. Freeze the verified contract
+1. Click "Implement" to start the implementation process
 2. Multiple agents claim and implement nodes in parallel
 3. Watch real-time progress as nodes transition: drafted → in_progress → implemented
 4. Download the generated code
@@ -119,26 +113,27 @@ IterViz/
 │   │   ├── api.py              # REST endpoints
 │   │   ├── ws.py               # WebSocket for live updates
 │   │   ├── architect.py        # Architect agent (prompt → contract)
-│   │   ├── compiler.py         # Verifier (contract → violations)
+│   │   ├── subgraph.py         # Subgraph generation (node → tasks)
 │   │   ├── orchestrator.py     # Phase 2 implementation coordinator
 │   │   ├── agents.py           # External agent registry
 │   │   ├── assignments.py      # Node assignment tracking
 │   │   ├── schemas.py          # Pydantic models
 │   │   └── prompts/            # LLM system prompts
 │   ├── scripts/
-│   │   ├── eval_compiler.py    # Evaluation harness
-│   │   └── seed_contracts/     # Test fixtures (8 contracts)
+│   │   └── seed_contracts/     # Test fixtures
 │   └── tests/                  # pytest suite
 ├── frontend/                   # React + Vite + TypeScript
 │   └── src/
 │       ├── components/
 │       │   ├── Graph.tsx       # React Flow graph renderer
 │       │   ├── NodeCard.tsx    # Custom node component
-│       │   ├── QuestionPanel.tsx
+│       │   ├── SubgraphView.tsx # Implementation subgraph view
+│       │   ├── InfoPanel.tsx   # Planning info & task details
 │       │   ├── ControlBar.tsx
 │       │   └── AgentPanel.tsx  # Connected agents display
 │       ├── state/
 │       │   ├── contract.ts     # Zustand store
+│       │   ├── subgraph.ts     # Subgraph store
 │       │   └── websocket.ts    # WS connection manager
 │       └── api/
 │           └── client.ts       # Backend API wrapper
@@ -157,14 +152,14 @@ IterViz/
 |----------|-------------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key | — |
 | `OPENAI_API_KEY` | OpenAI API key | — |
-| `GLASSHOUSE_LLM_PROVIDER` | Force provider: `openai` or `anthropic` | Auto-detect |
-| `GLASSHOUSE_COMPILER_MODEL` | Override model for Verifier | `claude-opus-4-5` |
+| `ITERVIZ_LLM_PROVIDER` | Force provider: `openai` or `anthropic` | Auto-detect |
+| `ITERVIZ_ARCHITECT_MODEL` | Override model for Architect | `claude-opus-4-5` |
 | `DEBUG` | Enable verbose logging | `0` |
 
 ### LLM Provider Selection
 
 Priority order:
-1. Explicit `GLASSHOUSE_LLM_PROVIDER` env var
+1. Explicit `ITERVIZ_LLM_PROVIDER` env var
 2. If `ANTHROPIC_API_KEY` is set → use Anthropic
 3. If `OPENAI_API_KEY` is set → use OpenAI
 

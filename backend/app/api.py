@@ -54,6 +54,7 @@ from .schemas import (
     ImplementResponse,
     ImplementationSubgraph,
     ListAgentsResponse,
+    Node,
     NodeStatus,
     NodeStatusRequest,
     NodeStatusResponse,
@@ -85,8 +86,14 @@ router = APIRouter(prefix="/api/v1", tags=["sessions"])
     response_model=CreateSessionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_session(request: CreateSessionRequest) -> CreateSessionResponse:
-    """Create a session, run the Architect, persist the contract."""
+async def create_session(
+    request: CreateSessionRequest,
+    background_tasks: BackgroundTasks,
+) -> CreateSessionResponse:
+    """Create a session, run the Architect, persist the contract.
+    
+    Also triggers background generation of subgraphs for all nodes.
+    """
     log.info("api.create_session", extra={"prompt_len": len(request.prompt)})
     try:
         contract = architect_svc.generate_contract(request.prompt)
@@ -96,9 +103,54 @@ def create_session(request: CreateSessionRequest) -> CreateSessionResponse:
         ) from exc
 
     session = contract_svc.create_session(contract)
+    
+    # Generate subgraphs for all nodes in the background
+    background_tasks.add_task(
+        _generate_all_subgraphs_background,
+        session.id,
+        session.contract,
+    )
+    
     return CreateSessionResponse(
         session_id=session.id, contract=session.contract
     )
+
+
+async def _generate_all_subgraphs_background(
+    session_id: str,
+    contract: Contract,
+) -> None:
+    """Generate implementation subgraphs for all nodes in parallel.
+    
+    Broadcasts each subgraph as it completes so the frontend can
+    update progressively.
+    """
+    log.info(
+        "api.subgraphs_background_start",
+        extra={"session_id": session_id, "node_count": len(contract.nodes)},
+    )
+    
+    async def generate_one(node: Node) -> None:
+        try:
+            neighbor_interfaces = subgraph_svc.get_neighbor_interfaces(
+                node, contract
+            )
+            subgraph = await asyncio.to_thread(
+                subgraph_svc.generate_subgraph,
+                node,
+                contract,
+                neighbor_interfaces,
+            )
+            subgraphs_store.store_subgraph(subgraph)
+            await ws_svc.broadcast_subgraph_created(session_id, node.id, subgraph)
+        except Exception as exc:
+            log.warning(
+                "api.subgraph_background_failed",
+                extra={"session_id": session_id, "node_id": node.id, "error": str(exc)},
+            )
+    
+    # Generate all subgraphs concurrently
+    await asyncio.gather(*[generate_one(node) for node in contract.nodes])
 
 
 @router.get("/sessions/{session_id}", response_model=GetSessionResponse)
@@ -670,7 +722,10 @@ async def implement_session(
     request: ImplementRequest,
     background_tasks: BackgroundTasks,
 ) -> ImplementResponse:
-    """Start Phase 2 implementation in either internal or external mode."""
+    """Start Phase 2 implementation in either internal or external mode.
+    
+    Auto-freezes the contract if not already frozen.
+    """
     try:
         session = contract_svc.get_session(session_id)
     except contract_svc.SessionNotFoundError as exc:
@@ -683,11 +738,16 @@ async def implement_session(
         if isinstance(session.contract.meta.status, str)
         else session.contract.meta.status.value
     )
+    
+    # Auto-freeze if not already frozen
     if current_status != ContractStatus.VERIFIED.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Contract must be frozen before implementation",
-        )
+        try:
+            orchestrator_svc.freeze_contract(session_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Could not prepare contract for implementation: {exc}",
+            ) from exc
 
     assignments = orchestrator_svc.create_assignments(session_id)
     job_id = str(uuid.uuid4())

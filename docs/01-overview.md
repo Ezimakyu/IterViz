@@ -1,6 +1,6 @@
 # 1. Overview
 
-IterViz is a visual AI agent orchestrator for software architecture planning. It transforms natural language prompts into verified system designs represented as interactive graphs, then coordinates multiple agents to implement each component while providing real-time progress visualization.
+IterViz is a visual AI agent orchestrator for software architecture planning. It transforms natural language prompts into system designs represented as interactive graphs, then coordinates multiple agents to implement each component while providing real-time progress visualization.
 
 This page summarizes the system at a glance. Each subsystem is described in more detail in pages 2.x; the implementation roadmap is in [1.2](01-2-repository-status-and-roadmap.md).
 
@@ -8,11 +8,11 @@ This page summarizes the system at a glance. Each subsystem is described in more
 
 ## 1.1 What IterViz Is
 
-* A **Python backend** (`backend/`) that hosts the Architect agent, Verifier, and multi-agent Orchestrator.
+* A **Python backend** (`backend/`) that hosts the Architect agent, Subgraph generator, and multi-agent Orchestrator.
 * A **TypeScript frontend** (`frontend/`) that renders interactive system graphs with React Flow and provides real-time progress updates.
-* A **developer-in-the-loop verification** system that ensures AI-generated architectures meet consistency and completeness requirements before implementation begins.
+* A **visual orchestration tool** that lets you explore AI-generated architectures through interactive graphs before and during implementation.
 
-A typical workflow: enter a prompt like *"Build a Slack bot that summarizes unread DMs daily"*, watch the Architect generate a system graph, answer clarifying questions from the Verifier, then watch multiple agents implement each node in parallel.
+A typical workflow: enter a prompt like *"Build a Slack bot that summarizes unread DMs daily"*, watch the Architect generate a system graph, click on nodes to explore their implementation breakdown, then watch multiple agents implement each node in parallel.
 
 ---
 
@@ -22,20 +22,17 @@ A typical workflow: enter a prompt like *"Build a Slack bot that summarizes unre
 flowchart LR
     Prompt["Natural Language\nPrompt"] --> Architect["Architect Agent"]
     Architect --> Contract["System Contract\n(Graph)"]
-    Contract --> Verifier["Verifier"]
-    Verifier -->|Questions| Developer["Developer"]
-    Developer -->|Answers| Architect
-    Verifier -->|Passes| Freeze["Freeze Contract"]
-    Freeze --> Orchestrator["Orchestrator"]
+    Contract --> Review["Review &\nExplore Subgraphs"]
+    Review --> Orchestrator["Orchestrator"]
     Orchestrator --> Agents["Implementation\nAgents"]
     Agents --> Code["Generated Code"]
 ```
 
 The system operates in two phases:
 
-**Phase 1 — Planning Loop:** The Architect generates a contract (graph), the Verifier checks it for issues, the developer answers questions, and the cycle repeats until the contract passes verification.
+**Phase 1 — Planning:** The Architect generates a contract (graph) from your prompt. You can click on any node to see its implementation subgraph — a breakdown of the functions, tests, and types needed to implement that component.
 
-**Phase 2 — Implementation:** The verified contract is frozen, the Orchestrator assigns nodes to agents, and agents implement components in parallel while the UI shows real-time progress.
+**Phase 2 — Implementation:** Click "Implement" to start. The Orchestrator assigns nodes to agents, and agents implement components in parallel while the UI shows real-time progress.
 
 ---
 
@@ -45,11 +42,11 @@ The system operates in two phases:
 flowchart LR
     A["Developer Prompt"] --> B["Architect Agent"]
     B --> C["Contract Store\n(SQLite)"]
-    C --> D["Verifier"]
+    C --> D["Subgraph Generator"]
     D --> E["REST + WS API"]
     E --> F["React Flow UI"]
-    F -->|Answers| E
-    E -->|Refined Contract| B
+    F -->|Implement| E
+    E -->|Progress Updates| F
 ```
 
 All communication uses **JSON over REST and WebSocket**. The frontend connects via WebSocket to receive real-time updates as nodes transition through implementation states.
@@ -61,12 +58,12 @@ All communication uses **JSON over REST and WebSocket**. The frontend connects v
 | Component | Language | Status | Description |
 |-----------|----------|--------|-------------|
 | `backend/app/architect.py` | Python | Implemented | Generates contracts from prompts |
-| `backend/app/compiler.py` | Python | Implemented | Verifies contracts, emits violations |
+| `backend/app/subgraph.py` | Python | Implemented | Generates implementation task breakdowns |
 | `backend/app/orchestrator.py` | Python | Implemented | Coordinates multi-agent implementation |
 | `backend/app/ws.py` | Python | Implemented | WebSocket for live updates |
 | `frontend/src/components/Graph.tsx` | TypeScript | Implemented | React Flow graph renderer |
 | `frontend/src/components/NodeCard.tsx` | TypeScript | Implemented | Custom node visualization |
-| Implementation Subgraphs | Both | In Progress | Detailed task breakdown per node |
+| `frontend/src/components/SubgraphView.tsx` | TypeScript | Implemented | Implementation subgraph view |
 
 ---
 

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Graph } from "./components/Graph";
 import { ControlBar } from "./components/ControlBar";
 import { PromptInput } from "./components/PromptInput";
-import { QuestionPanel } from "./components/QuestionPanel";
+import { InfoPanel } from "./components/InfoPanel";
 import { AgentPanel } from "./components/AgentPanel";
 import { useContractStore } from "./state/contract";
 import { useWebSocketStore } from "./state/websocket";
@@ -31,7 +31,7 @@ export default function App() {
         <div className="relative flex-1">
           <Graph contract={contract} />
         </div>
-        <QuestionPanel />
+        <InfoPanel />
         <AgentPanel />
       </main>
     </div>

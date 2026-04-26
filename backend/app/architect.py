@@ -57,8 +57,9 @@ def generate_contract(prompt: str) -> Contract:
 
     # Always reflect the original prompt in meta.prompt_history so the
     # downstream pipeline can audit what the user actually said.
-    if not contract.meta.id:
-        contract.meta.id = _new_id()
+    # Always generate a fresh UUID for new contracts — the LLM may return
+    # a placeholder or hallucinated ID that collides with existing sessions.
+    contract.meta.id = _new_id()
     contract.meta.prompt_history = [
         PromptHistoryEntry(role="user", content=prompt, timestamp=_now())
     ] + [e for e in contract.meta.prompt_history if e.content != prompt]

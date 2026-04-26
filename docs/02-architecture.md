@@ -10,7 +10,7 @@ IterViz consists of a Python backend (`backend/`) and a TypeScript frontend (`fr
 flowchart TB
     subgraph Frontend ["Frontend (React + Vite)"]
         UI["React Flow Graph"]
-        QP["Question Panel"]
+        IP["Info Panel"]
         CP["Control Bar"]
         WS["WebSocket Client"]
         Store["Zustand Store"]
@@ -20,7 +20,7 @@ flowchart TB
         API["REST API"]
         WSS["WebSocket Server"]
         Arch["Architect Agent"]
-        Ver["Verifier"]
+        SG["Subgraph Generator"]
         Orch["Orchestrator"]
         Agents["Agent Registry"]
         DB[(SQLite)]
@@ -32,25 +32,25 @@ flowchart TB
     end
     
     UI --> Store
-    QP --> Store
+    IP --> Store
     CP --> Store
     Store <--> API
     Store <--> WS
     WS <--> WSS
     
     API --> Arch
-    API --> Ver
+    API --> SG
     API --> Orch
     API --> Agents
     
     Arch --> DB
-    Ver --> DB
+    SG --> DB
     Orch --> DB
     
     Arch --> OpenAI
     Arch --> Anthropic
-    Ver --> OpenAI
-    Ver --> Anthropic
+    SG --> OpenAI
+    SG --> Anthropic
 ```
 
 All API communication uses JSON. The frontend connects via WebSocket for real-time updates (contract changes, node status transitions, agent activity).
@@ -59,14 +59,14 @@ All API communication uses JSON. The frontend connects via WebSocket for real-ti
 
 ## 2.2 Two-Phase Architecture
 
-### Phase 1: Planning Loop
+### Phase 1: Planning
 
 ```mermaid
 sequenceDiagram
     participant UI as Frontend
     participant API as REST API
     participant Arch as Architect
-    participant Ver as Verifier
+    participant SG as Subgraph Gen
     participant DB as SQLite
 
     UI->>API: POST /sessions {prompt}
@@ -74,16 +74,10 @@ sequenceDiagram
     Arch->>DB: Store contract
     API-->>UI: Contract (graph JSON)
     
-    loop Until verified
-        UI->>API: POST /compiler/verify
-        API->>Ver: Check contract
-        Ver-->>API: Violations + questions
-        API-->>UI: Display questions
-        UI->>API: POST /answers {decisions}
-        API->>Arch: Refine contract
-        Arch->>DB: Update contract
-        API-->>UI: Updated contract
-    end
+    UI->>API: POST /nodes/{id}/subgraph
+    API->>SG: Generate subgraph
+    SG->>DB: Store subgraph
+    API-->>UI: Subgraph (tasks JSON)
 ```
 
 ### Phase 2: Implementation

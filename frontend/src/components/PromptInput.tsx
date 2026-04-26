@@ -22,8 +22,8 @@ export function PromptInput() {
             Describe what you want to build
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Glasshouse will draft an architecture contract from your prompt
-            and run the Blind Compiler against it.
+            IterViz will generate an architecture plan from your prompt
+            that you can then implement with AI agents.
           </p>
         </div>
 
@@ -36,29 +36,67 @@ export function PromptInput() {
           data-testid="prompt-input"
         />
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-            onClick={submit}
-            disabled={isLoading || !prompt.trim()}
-            data-testid="prompt-submit"
-          >
-            {isLoading ? "Drafting…" : "Architect"}
-          </button>
-          <button
-            type="button"
-            className="rounded border border-slate-700 px-3 py-2 text-xs text-muted hover:text-ink"
-            onClick={() => setPrompt(SAMPLE_PROMPT)}
-            disabled={isLoading}
-          >
-            Use sample prompt
-          </button>
-          {error && (
-            <span className="text-xs text-red-400">{error}</span>
-          )}
-        </div>
+        {isLoading ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3 text-sm text-muted">
+              <LoadingSpinner />
+              <span>Generating architecture plan...</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-700">
+              <div className="h-full w-1/3 animate-pulse bg-sky-500 transition-all duration-300" />
+            </div>
+            <p className="text-xs text-muted">
+              This may take a minute depending on the complexity of your request.
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+              onClick={submit}
+              disabled={!prompt.trim()}
+              data-testid="prompt-submit"
+            >
+              Generate Plan
+            </button>
+            <button
+              type="button"
+              className="rounded border border-slate-700 px-3 py-2 text-xs text-muted hover:text-ink"
+              onClick={() => setPrompt(SAMPLE_PROMPT)}
+            >
+              Use sample prompt
+            </button>
+            {error && (
+              <span className="text-xs text-red-400">{error}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function LoadingSpinner() {
+  return (
+    <svg
+      className="h-4 w-4 animate-spin text-sky-400"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
   );
 }

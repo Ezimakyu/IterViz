@@ -1,36 +1,22 @@
-import { useMemo } from "react";
-import dagre from "dagre";
 import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
   ReactFlowProvider,
-  type Edge,
-  type Node,
   type EdgeTypes,
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import type {
   ImplementationSubgraph,
-  SubgraphEdge,
-  SubgraphNode,
   SubgraphNodeStatus,
 } from "../types/subgraph";
 import { useSubgraphStore } from "../state/subgraph";
-import {
-  SubgraphNodeCard,
-  type SubgraphNodeCardData,
-} from "./SubgraphNodeCard";
+import { SubgraphNodeCard } from "./SubgraphNodeCard";
+import { useSubgraphForceLayout } from "../hooks/useSubgraphForceLayout";
 
 const nodeTypes: NodeTypes = { sg: SubgraphNodeCard };
 const edgeTypes: EdgeTypes = {};
-
-// Match the big-picture node spacing constants (M6 spec §6).
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 60;
-const NODESEP = 60;
-const RANKSEP = 80;
 
 interface SubgraphViewProps {
   parentNodeId: string;
@@ -49,29 +35,26 @@ function SubgraphInner({ parentNodeId, onBack }: SubgraphViewProps) {
   const subgraph = useSubgraphStore((s) => s.subgraphs[parentNodeId]);
   const openSubgraphPopup = useSubgraphStore((s) => s.openSubgraphPopup);
 
-  const { nodes, edges } = useMemo(() => {
-    if (!subgraph) return { nodes: [] as Node[], edges: [] as Edge[] };
-    return buildLaidOutGraph(subgraph, (sgNodeId: string) =>
-      openSubgraphPopup(parentNodeId, sgNodeId),
-    );
-  }, [subgraph, parentNodeId, openSubgraphPopup]);
+  const handleSelect = (sgNodeId: string) => {
+    openSubgraphPopup(parentNodeId, sgNodeId);
+  };
+
+  useSubgraphForceLayout(subgraph ?? null, parentNodeId, handleSelect);
 
   return (
     <div className="relative h-full w-full">
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        defaultNodes={[]}
+        defaultEdges={[]}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         proOptions={{ hideAttribution: true }}
-        defaultViewport={{ x: 80, y: 80, zoom: 0.85 }}
+        defaultViewport={{ x: 400, y: 300, zoom: 0.85 }}
         minZoom={0.2}
         maxZoom={1.8}
-        nodesDraggable={false}
+        nodesDraggable
         panOnDrag
         zoomOnDoubleClick={false}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
       >
         <Background
           variant={BackgroundVariant.Dots}
@@ -174,52 +157,3 @@ function progressBarColor(status: SubgraphNodeStatus): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// dagre layout
-// ---------------------------------------------------------------------------
-
-function buildLaidOutGraph(
-  subgraph: ImplementationSubgraph,
-  onSelect: (subgraphNodeId: string) => void,
-): { nodes: Node[]; edges: Edge[] } {
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: NODESEP, ranksep: RANKSEP });
-  g.setDefaultEdgeLabel(() => ({}));
-
-  for (const node of subgraph.nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
-  }
-  for (const edge of subgraph.edges) {
-    g.setEdge(edge.source, edge.target);
-  }
-
-  dagre.layout(g);
-
-  const nodes: Node<SubgraphNodeCardData>[] = subgraph.nodes.map(
-    (node: SubgraphNode) => {
-      const dn = g.node(node.id);
-      return {
-        id: node.id,
-        type: "sg",
-        position: dn
-          ? { x: dn.x - NODE_WIDTH / 2, y: dn.y - NODE_HEIGHT / 2 }
-          : { x: 0, y: 0 },
-        data: {
-          node,
-          parentNodeId: subgraph.parent_node_id,
-          onSelect,
-        },
-      };
-    },
-  );
-
-  const edges: Edge[] = subgraph.edges.map((edge: SubgraphEdge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label ?? undefined,
-    style: { stroke: "#475569", strokeWidth: 1.5 },
-  }));
-
-  return { nodes, edges };
-}

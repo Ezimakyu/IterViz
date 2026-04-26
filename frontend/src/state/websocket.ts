@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { WSMessage } from "../types/contract";
 import { useContractStore } from "./contract";
+import { useSubgraphStore } from "./subgraph";
 
 /**
  * Live WebSocket store for Phase 2.
@@ -73,6 +74,21 @@ function handleMessage(message: WSMessage): void {
     }
     case "error": {
       console.warn("[ws] error:", message.message);
+      break;
+    }
+    case "subgraph_created": {
+      useSubgraphStore.getState().upsertSubgraph(message.subgraph);
+      break;
+    }
+    case "subgraph_node_status_changed": {
+      useSubgraphStore
+        .getState()
+        .updateNodeStatus(
+          message.parent_node_id,
+          message.subgraph_node_id,
+          message.status,
+          message.progress,
+        );
       break;
     }
     default:

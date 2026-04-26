@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -15,9 +15,13 @@ import { NodeCard } from "./NodeCard";
 import { EdgeLabel } from "./EdgeLabel";
 import { NodeDetailsPopup } from "./NodeDetailsPopup";
 import { EdgeDetailsPopup } from "./EdgeDetailsPopup";
+import { NodePopupManager } from "./NodePopupManager";
+import { SubgraphView } from "./SubgraphView";
 import { useForceLayout } from "../hooks/useForceLayout";
 import { useContractStore } from "../state/contract";
+import { useSubgraphStore } from "../state/subgraph";
 import { buildHierarchy } from "../utils/hierarchy";
+import { API, isApiError } from "../api/client";
 
 const nodeTypes: NodeTypes = { oval: NodeCard };
 const edgeTypes: EdgeTypes = { floating: EdgeLabel };
@@ -42,11 +46,19 @@ function GraphInner({ contract }: GraphProps) {
     toggleSelectedEdge,
     clearSelection,
   } = useContractStore();
+  const sessionId = useContractStore((s) => s.sessionId);
   const previousContract = useContractStore((s) => s.previousContract);
   const provenanceView = useContractStore((s) => s.provenanceView);
   const toggleProvenanceView = useContractStore(
     (s) => s.toggleProvenanceView,
   );
+  const activeParentNodeId = useSubgraphStore((s) => s.activeParentNodeId);
+  const setActiveSubgraph = useSubgraphStore((s) => s.setActiveSubgraph);
+  const upsertSubgraph = useSubgraphStore((s) => s.upsertSubgraph);
+  const subgraphCache = useSubgraphStore((s) => s.subgraphs);
+  // M5's ControlBar already opens the session WebSocket via
+  // `useWebSocketStore.connect`; subgraph events are routed by the same
+  // store handler -- no extra subscription needed here.
 
   const userEditedCount = useMemo(
     () =>
@@ -90,9 +102,34 @@ function GraphInner({ contract }: GraphProps) {
     hierarchy,
   });
 
-  const onNodeClick: NodeMouseHandler = (event, node) => {
+  // Tracks the most recently clicked node id so a slow generateSubgraph
+  // response from an earlier click can't stomp the active subgraph after
+  // the user has already clicked a different node.
+  const latestClickRef = useRef<string | null>(null);
+
+  const onNodeClick: NodeMouseHandler = async (event, rfNode) => {
     event.stopPropagation();
-    toggleSelectedNode(node.id);
+    if (!sessionId) {
+      toggleSelectedNode(rfNode.id);
+      return;
+    }
+
+    latestClickRef.current = rfNode.id;
+
+    // Left-click enters the implementation subgraph for the node.
+    // Generate it lazily on the first click.
+    if (!subgraphCache[rfNode.id]) {
+      const result = await API.generateSubgraph(sessionId, rfNode.id);
+      if (latestClickRef.current !== rfNode.id) return;
+      if (!isApiError(result)) {
+        upsertSubgraph(result.subgraph);
+      } else {
+        toggleSelectedNode(rfNode.id);
+        return;
+      }
+    }
+    if (latestClickRef.current !== rfNode.id) return;
+    setActiveSubgraph(rfNode.id);
   };
 
   const onEdgeClick: EdgeMouseHandler = (event, edge) => {
@@ -193,6 +230,17 @@ function GraphInner({ contract }: GraphProps) {
           onClose={() => toggleSelectedEdge(selectedEdge.id)}
         />
       )}
+
+      {activeParentNodeId && (
+        <div className="absolute inset-0 z-30 bg-canvas">
+          <SubgraphView
+            parentNodeId={activeParentNodeId}
+            onBack={() => setActiveSubgraph(null)}
+          />
+        </div>
+      )}
+
+      <NodePopupManager />
     </div>
   );
 }

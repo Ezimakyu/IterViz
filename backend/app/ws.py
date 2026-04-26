@@ -17,8 +17,10 @@ from fastapi import WebSocket
 from .logger import get_logger
 from .schemas import (
     AgentType,
+    ImplementationSubgraph,
     IntegrationMismatch,
     NodeStatus,
+    SubgraphNodeStatus,
     WSAgentConnected,
     WSError,
     WSImplementationComplete,
@@ -27,6 +29,8 @@ from .schemas import (
     WSNodeClaimed,
     WSNodeProgress,
     WSNodeStatusChanged,
+    WSSubgraphCreated,
+    WSSubgraphNodeStatusChanged,
 )
 
 log = get_logger(__name__)
@@ -213,6 +217,41 @@ async def broadcast_error(
     await manager.broadcast(session_id, msg)
 
 
+# ---------------------------------------------------------------------------
+# M6: subgraph broadcast helpers
+# ---------------------------------------------------------------------------
+
+
+async def broadcast_subgraph_created(
+    session_id: str,
+    parent_node_id: str,
+    subgraph: ImplementationSubgraph,
+) -> None:
+    """Broadcast that an implementation subgraph was generated."""
+    msg = WSSubgraphCreated(
+        parent_node_id=parent_node_id,
+        subgraph=subgraph,
+    )
+    await manager.broadcast(session_id, msg)
+
+
+async def broadcast_subgraph_node_status_changed(
+    session_id: str,
+    parent_node_id: str,
+    subgraph_node_id: str,
+    status: SubgraphNodeStatus,
+    progress: float,
+) -> None:
+    """Broadcast a status transition for a subgraph node."""
+    msg = WSSubgraphNodeStatusChanged(
+        parent_node_id=parent_node_id,
+        subgraph_node_id=subgraph_node_id,
+        status=status,
+        progress=progress,
+    )
+    await manager.broadcast(session_id, msg)
+
+
 __all__ = [
     "ConnectionManager",
     "manager",
@@ -223,6 +262,8 @@ __all__ = [
     "broadcast_implementation_complete",
     "broadcast_integration_result",
     "broadcast_error",
+    "broadcast_subgraph_created",
+    "broadcast_subgraph_node_status_changed",
 ]
 
 

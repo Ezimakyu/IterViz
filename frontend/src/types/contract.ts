@@ -216,7 +216,10 @@ export type WSMessageType =
   | "agent_connected"
   | "implementation_complete"
   | "integration_result"
-  | "error";
+  | "error"
+  // M6: implementation subgraph events
+  | "subgraph_created"
+  | "subgraph_node_status_changed";
 
 export interface WSMessageBase {
   type: WSMessageType;
@@ -271,6 +274,23 @@ export interface WSErrorMessage extends WSMessageBase {
   recoverable: boolean;
 }
 
+export interface WSSubgraphCreated extends WSMessageBase {
+  type: "subgraph_created";
+  parent_node_id: string;
+  // ImplementationSubgraph is defined in ../types/subgraph; using a
+  // structural import here would create a cycle. The handler casts it
+  // to the canonical type at the dispatch site.
+  subgraph: import("./subgraph").ImplementationSubgraph;
+}
+
+export interface WSSubgraphNodeStatusChanged extends WSMessageBase {
+  type: "subgraph_node_status_changed";
+  parent_node_id: string;
+  subgraph_node_id: string;
+  status: import("./subgraph").SubgraphNodeStatus;
+  progress: number;
+}
+
 export type WSMessage =
   | WSNodeStatusChanged
   | WSNodeProgress
@@ -279,4 +299,6 @@ export type WSMessage =
   | WSImplementationComplete
   | WSIntegrationResult
   | WSErrorMessage
+  | WSSubgraphCreated
+  | WSSubgraphNodeStatusChanged
   | (WSMessageBase & { type: "contract_updated" });

@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { ContractNode } from "../types/contract";
 import { useContractStore } from "../state/contract";
+import { useSubgraphStore } from "../state/subgraph";
 import { type Tier, TIER_SIZE } from "../utils/hierarchy";
 
 export interface NodeCardData {
@@ -56,6 +57,8 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
   const nodeAgents = useContractStore((s) => s.nodeAgents);
   const userEditedFields = useContractStore((s) => s.userEditedFields);
   const provenanceView = useContractStore((s) => s.provenanceView);
+  const openBigPicturePopup = useSubgraphStore((s) => s.openBigPicturePopup);
+  const hasSubgraph = useSubgraphStore((s) => Boolean(s.subgraphs[id]));
   const isSpotlight = selectedNodeId === id;
   const size = TIER_SIZE[tier];
   const statusRing = STATUS_RING[node.status] ?? "";
@@ -131,6 +134,25 @@ function NodeCardImpl({ id, data, selected }: NodeProps<NodeCardData>) {
         >
           USER
         </span>
+      )}
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          openBigPicturePopup(node.id);
+        }}
+        aria-label={`Show details for ${node.name}`}
+        data-testid={`node-info-button-${node.id}`}
+        className="absolute -top-1 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-slate-400 bg-white/80 text-[11px] font-semibold text-slate-700 shadow hover:bg-sky-100 hover:text-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+      >
+        i
+      </button>
+      {hasSubgraph && (
+        <span
+          aria-hidden
+          data-testid={`node-subgraph-indicator-${node.id}`}
+          className="absolute -bottom-1 -right-1 inline-flex h-3 w-3 rounded-full border border-white bg-emerald-500 shadow"
+        />
       )}
       <div className="flex items-center justify-center">
         <h3

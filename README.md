@@ -4,7 +4,19 @@
 
 IterViz bridges the gap between high-level software ideas and working code. You describe what you want to build, an Architect agent generates a graph-based system design, a Verifier ensures consistency and completeness through developer Q&A, and then multiple agents implement each component while you watch their progress live.
 
-> **Status:** Active development. Core Phase 1 (planning loop) and Phase 2 (multi-agent implementation) are functional. Implementation subgraphs (M6) are in progress.
+---
+
+## Terminology
+
+**Contract:** A graph-based representation of a software system. Contains nodes (components), edges (data/control flow), failure scenarios, and decisions.
+
+**Node:** A component in the system — service, store, external API, etc. Has a name, description, responsibilities, confidence score, and implementation status.
+
+**Edge:** A connection between nodes — data flow, control flow, or dependency. Includes payload schema and failure handling.
+
+**Verification:** The Verifier runs multiple passes to check invariants (orphaned nodes, missing payloads, cycles), provenance (who decided what), and failure scenarios.
+
+**UVDC (User-Visible Decision Coverage):** Percentage of load-bearing decisions that have been explicitly confirmed by the user vs. assumed by the agent.
 
 ---
 
@@ -12,15 +24,20 @@ IterViz bridges the gap between high-level software ideas and working code. You 
 
 ```mermaid
 flowchart LR
-    Prompt["Natural Language\nPrompt"] --> Architect["Architect Agent"]
-    Architect --> Contract["System Contract\n(Graph)"]
-    Contract --> Verifier["Verifier"]
-    Verifier -->|Questions| Developer["Developer"]
-    Developer -->|Answers| Architect
-    Verifier -->|Passes| Freeze["Freeze Contract"]
-    Freeze --> Orchestrator["Orchestrator"]
-    Orchestrator --> Agents["Implementation\nAgents"]
-    Agents --> Code["Generated Code"]
+    subgraph Phase1 [Phase 1: Planning Loop]
+        Prompt["Natural Language\nPrompt"] --> Architect["Architect Agent"]
+        Architect --> Contract["System Contract\n(Graph)"]
+        Contract --> Verifier["Verifier"]
+        Verifier -->|Questions| Developer["Developer"]
+        Developer -->|Answers| Architect
+        Verifier -->|Passes| Freeze["Freeze Contract"]
+    end
+    
+    subgraph Phase2 [Phase 2: Implementation]
+        Freeze --> Orchestrator["Orchestrator"]
+        Orchestrator --> Agents["Implementation\nAgents"]
+        Agents --> Code["Generated Code"]
+    end
 ```
 
 **Phase 1 — Planning Loop:**
@@ -42,7 +59,7 @@ flowchart LR
 
 ### Prerequisites
 
-- **Python 3.10+** (conda recommended)
+- **Python 3.10+** (via conda)
 - **Node.js 18+**
 - **API Key:** `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
@@ -52,6 +69,11 @@ You'll need **two terminals** — one for the backend, one for the frontend.
 
 **Terminal 1 — Backend:**
 ```bash
+# Create and activate conda environment
+conda create -n iterviz python=3.10 -y
+conda activate iterviz
+
+# Install dependencies
 cd backend
 pip install -r requirements.txt
 
@@ -61,7 +83,10 @@ export ANTHROPIC_API_KEY="your-key-here"
 ```
 
 **Terminal 2 — Frontend:**
+
+Install Node.js 
 ```bash
+# Install dependencies
 cd frontend
 npm install
 ```
@@ -70,6 +95,7 @@ npm install
 
 **Terminal 1 — Start backend (port 8000):**
 ```bash
+conda activate iterviz
 cd backend
 DEBUG=1 uvicorn app.main:app --reload
 ```
@@ -81,42 +107,6 @@ npm run dev
 ```
 
 Open **http://localhost:5173** in your browser.
-
----
-
-## Demo Walkthrough
-
-### Option 1: Compiler Eval (No UI, tests verification logic)
-
-Run the compiler evaluation harness against 8 seed contracts:
-
-```bash
-cd backend
-
-# Parse-only mode (no LLM calls, fast)
-python scripts/eval_compiler.py --no-llm
-
-# Full LLM evaluation (requires API key)
-python scripts/eval_compiler.py
-```
-
-This tests the Verifier's ability to detect invariant violations, missing payloads, orphaned nodes, and other contract issues.
-
-### Option 2: Full Phase 1 + Phase 2 Demo
-
-1. Start both backend and frontend (see Running above)
-2. Open http://localhost:5173
-3. Enter a prompt:
-   ```
-   Build a Slack bot that summarizes unread DMs daily
-   ```
-4. Click **Architect** — watch the system graph appear
-5. Click **Verify** — see violations and questions
-6. Answer the questions, click **Submit**
-7. Repeat Verify → Answer until the contract passes (typically 2-3 iterations)
-8. Click **Freeze** to lock the contract
-9. Click **Implement** — watch nodes turn yellow (in progress) then green (implemented)
-10. Click **Download** to get the generated code
 
 ---
 
@@ -180,37 +170,6 @@ Priority order:
 
 ---
 
-## Key Concepts
-
-**Contract:** A graph-based representation of a software system. Contains nodes (components), edges (data/control flow), failure scenarios, and decisions.
-
-**Node:** A component in the system — service, store, external API, etc. Has a name, description, responsibilities, confidence score, and implementation status.
-
-**Edge:** A connection between nodes — data flow, control flow, or dependency. Includes payload schema and failure handling.
-
-**Verification:** The Verifier runs multiple passes to check invariants (orphaned nodes, missing payloads, cycles), provenance (who decided what), and failure scenarios.
-
-**UVDC (User-Visible Decision Coverage):** Percentage of load-bearing decisions that have been explicitly confirmed by the user vs. assumed by the agent.
-
----
-
-## Testing
-
-```bash
-cd backend
-
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=app --cov-report=term-missing
-
-# Run specific test file
-pytest tests/test_compiler.py -v
-```
-
----
-
 ## Documentation
 
 | # | Page |
@@ -226,22 +185,6 @@ pytest tests/test_compiler.py -v
 | 3.1 | [Configuration Schema Reference](docs/03-1-configuration-schema-reference.md) |
 | 3.2 | [Usage Examples & Integration Guide](docs/03-2-usage-examples-and-integration-guide.md) |
 | 5 | [Glossary](docs/05-glossary.md) |
-
----
-
-## Roadmap
-
-See [TODO.md](TODO.md) for detailed milestone breakdown.
-
-| Milestone | Description | Status |
-|-----------|-------------|--------|
-| M0 | Static React Flow mockup | Done |
-| M1 | Compiler tuning harness | Done |
-| M2 | Architect agent + contract I/O | Done |
-| M3 | Phase 1 loop end-to-end | Done |
-| M4 | Editable graph + decision provenance | Done |
-| M5 | Phase 2 orchestrator | Done |
-| M6 | Implementation subgraphs + polish | In Progress |
 
 ---
 

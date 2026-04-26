@@ -452,6 +452,38 @@ class ContractResponse(BaseModel):
     contract: Contract
 
 
+# ---------------------------------------------------------------------------
+# M4: Node update API (Editable Graph + Decision Provenance)
+# ---------------------------------------------------------------------------
+
+
+class NodeUpdateRequest(BaseModel):
+    """Body for ``PATCH /sessions/{session_id}/nodes/{node_id}``.
+
+    Only editable fields are accepted. Structural fields like ``id``,
+    ``name``, and ``kind`` are intentionally non-editable: they are
+    bookkeeping concerns and not what users iterate on. Any field set
+    to a non-``None`` value is treated as a user edit and the node's
+    ``decided_by`` is flipped to ``user``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: Optional[str] = None
+    responsibilities: Optional[list[str]] = None
+    assumptions: Optional[list[Assumption]] = None
+
+
+class NodeUpdateResponse(BaseModel):
+    """Response for ``PATCH /sessions/{session_id}/nodes/{node_id}``."""
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
+    node: Node
+    fields_updated: list[str] = Field(default_factory=list)
+    provenance_set: dict[str, str] = Field(default_factory=dict)
+
+
 __all__ = [
     "Assumption",
     "ActualInterface",
@@ -490,4 +522,6 @@ __all__ = [
     "CompilerResponse",
     "AnswersRequest",
     "ContractResponse",
+    "NodeUpdateRequest",
+    "NodeUpdateResponse",
 ]

@@ -20,6 +20,8 @@ from .schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
     GetSessionResponse,
+    NodeUpdateRequest,
+    NodeUpdateResponse,
     RefineRequest,
     RefineResponse,
 )
@@ -130,6 +132,57 @@ def submit_answers(
     if last_session is None:
         last_session = contract_svc.get_session(session_id)
     return ContractResponse(contract=last_session.contract)
+
+
+# ---------------------------------------------------------------------------
+# M4: Node update — direct user edits to graph fields
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/sessions/{session_id}/nodes/{node_id}",
+    response_model=NodeUpdateResponse,
+)
+def update_node_endpoint(
+    session_id: str, node_id: str, body: NodeUpdateRequest
+) -> NodeUpdateResponse:
+    """Update node fields and set their provenance to ``user``.
+
+    Editable fields: ``description``, ``responsibilities``, ``assumptions``.
+    Structural fields (``id``, ``name``, ``kind``) are intentionally not
+    accepted — the Pydantic ``extra="forbid"`` config rejects them with a
+    422.
+    """
+    log.info(
+        "api.update_node_called",
+        extra={"session_id": session_id, "node_id": node_id},
+    )
+    try:
+        node, fields_updated, provenance_changes = contract_svc.update_node(
+            session_id, node_id, body
+        )
+    except contract_svc.SessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    log.info(
+        "api.node_updated",
+        extra={
+            "session_id": session_id,
+            "node_id": node_id,
+            "fields_updated": fields_updated,
+            "provenance_changes": provenance_changes,
+        },
+    )
+    return NodeUpdateResponse(
+        node=node,
+        fields_updated=fields_updated,
+        provenance_set=provenance_changes,
+    )
 
 
 @router.post(

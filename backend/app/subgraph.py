@@ -346,10 +346,24 @@ def _convert_planner_output(
     """Translate the LLM's loose structured output into validated models."""
 
     seen_ids: set[str] = set()
-    nodes: list[SubgraphNode] = []
+    # Map original LLM-emitted ids to the (possibly renamed) ids actually
+    # assigned to SubgraphNode instances. When duplicates collide,
+    # _ensure_unique_id keeps the first occurrence under the original id and
+    # renames subsequent ones; later edge/dependency references to the
+    # original id should resolve to the first node, which is what we want.
+    id_map: dict[str, str] = {}
+    raw_nodes_with_ids: list[tuple[_PlannerNode, str]] = []
     for raw_node in raw.nodes:
-        kind = _coerce_kind(raw_node.kind)
         sg_id = _ensure_unique_id(raw_node.id, seen_ids)
+        id_map.setdefault(raw_node.id, sg_id)
+        raw_nodes_with_ids.append((raw_node, sg_id))
+
+    nodes: list[SubgraphNode] = []
+    for raw_node, sg_id in raw_nodes_with_ids:
+        kind = _coerce_kind(raw_node.kind)
+        remapped_deps = [
+            id_map.get(dep, dep) for dep in raw_node.dependencies
+        ]
         nodes.append(
             SubgraphNode(
                 id=sg_id,
@@ -357,7 +371,7 @@ def _convert_planner_output(
                 kind=kind,
                 description=raw_node.description,
                 signature=raw_node.signature,
-                dependencies=list(dict.fromkeys(raw_node.dependencies)),
+                dependencies=list(dict.fromkeys(remapped_deps)),
                 estimated_lines=raw_node.estimated_lines,
             )
         )
@@ -365,13 +379,15 @@ def _convert_planner_output(
     valid_ids = {n.id for n in nodes}
     edges: list[SubgraphEdge] = []
     for raw_edge in raw.edges:
-        if raw_edge.source not in valid_ids or raw_edge.target not in valid_ids:
+        source = id_map.get(raw_edge.source, raw_edge.source)
+        target = id_map.get(raw_edge.target, raw_edge.target)
+        if source not in valid_ids or target not in valid_ids:
             continue
         edges.append(
             SubgraphEdge(
                 id=str(uuid.uuid4()),
-                source=raw_edge.source,
-                target=raw_edge.target,
+                source=source,
+                target=target,
                 label=raw_edge.label,
             )
         )

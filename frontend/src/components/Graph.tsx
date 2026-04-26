@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -102,6 +102,11 @@ function GraphInner({ contract }: GraphProps) {
     hierarchy,
   });
 
+  // Tracks the most recently clicked node id so a slow generateSubgraph
+  // response from an earlier click can't stomp the active subgraph after
+  // the user has already clicked a different node.
+  const latestClickRef = useRef<string | null>(null);
+
   const onNodeClick: NodeMouseHandler = async (event, rfNode) => {
     event.stopPropagation();
     if (!sessionId) {
@@ -109,10 +114,13 @@ function GraphInner({ contract }: GraphProps) {
       return;
     }
 
+    latestClickRef.current = rfNode.id;
+
     // Left-click enters the implementation subgraph for the node.
     // Generate it lazily on the first click.
     if (!subgraphCache[rfNode.id]) {
       const result = await API.generateSubgraph(sessionId, rfNode.id);
+      if (latestClickRef.current !== rfNode.id) return;
       if (!isApiError(result)) {
         upsertSubgraph(result.subgraph);
       } else {
@@ -120,6 +128,7 @@ function GraphInner({ contract }: GraphProps) {
         return;
       }
     }
+    if (latestClickRef.current !== rfNode.id) return;
     setActiveSubgraph(rfNode.id);
   };
 

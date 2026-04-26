@@ -123,6 +123,43 @@ def test_generate_subgraph_falls_back_when_llm_returns_empty(
     assert sg.nodes, "fallback should populate nodes even when the LLM is empty"
 
 
+def test_convert_planner_output_remaps_duplicate_ids_for_edges_and_deps(
+    sample_contract: Contract,
+) -> None:
+    """Duplicate LLM ids are renamed; edges/deps to the original id resolve to
+    the first node with that id (no orphans, no broken references)."""
+
+    from app import subgraph as subgraph_module
+    from app.subgraph import _PlannerEdge, _PlannerNode, _PlannerOutput
+
+    raw = _PlannerOutput(
+        nodes=[
+            _PlannerNode(id="x", name="X1", kind="function", dependencies=[]),
+            # Duplicate id -- _ensure_unique_id should rename this to e.g. x-2.
+            # Its dependency on "x" should remap to the first "x" (not stay
+            # as a stale string), and an edge sourced at "x" should connect
+            # to the first node with that id.
+            _PlannerNode(id="x", name="X2", kind="function", dependencies=["x"]),
+            _PlannerNode(id="y", name="Y", kind="test_unit", dependencies=["x"]),
+        ],
+        edges=[
+            _PlannerEdge(source="y", target="x"),
+        ],
+    )
+
+    nodes, edges, _ = subgraph_module._convert_planner_output(raw)
+
+    assert len(nodes) == 3
+    ids = [n.id for n in nodes]
+    assert ids[0] == "x"
+    assert ids[1] != "x" and ids[1].startswith("x")
+    # The renamed node's dependencies should not contain a stale "x" reference
+    # (it should resolve to the first "x" id, which is unchanged here).
+    assert all(dep in {n.id for n in nodes} for dep in nodes[1].dependencies)
+    # Edge target "x" stays valid because the first node kept that id.
+    assert any(e.source == "y" and e.target == "x" for e in edges)
+
+
 def test_generate_subgraph_falls_back_when_llm_raises(
     monkeypatch: pytest.MonkeyPatch, sample_contract: Contract
 ) -> None:

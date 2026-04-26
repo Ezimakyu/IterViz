@@ -34,12 +34,12 @@ interface SimNode extends SimulationNodeDatum {
 type SimLink = SimulationLinkDatum<SimNode> & { id: string };
 
 const BOOST_CHARGE = -2800;
-const LINK_DISTANCE = 280;
-const CHILD_LINK_DISTANCE = 150;
+const LINK_DISTANCE = 380;
+const CHILD_LINK_DISTANCE = 240;
 /** Min clearance from any edge midpoint to a non-adjacent node. */
-const LABEL_CLEARANCE = 110;
+const LABEL_CLEARANCE = 140;
 /** Min clearance between two edge midpoints (label-vs-label). */
-const LABEL_LABEL_CLEARANCE = 90;
+const LABEL_LABEL_CLEARANCE = 130;
 
 interface Options {
   boostedId: string | null;
@@ -60,7 +60,7 @@ interface Options {
  *    midpoint of every edge so the edge kind pill stays readable.
  */
 export function useForceLayout(contract: Contract | null, opts: Options) {
-  const { setNodes, setEdges, getNodes, fitView } = useReactFlow();
+  const { setNodes, setEdges, getNodes } = useReactFlow();
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
   const boostedRef = useRef<string | null>(null);
 
@@ -147,7 +147,7 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
           const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
           const minR = n.width / 2 + LABEL_CLEARANCE;
           if (dist < minR) {
-            const push = ((minR - dist) / dist) * alpha * 0.7;
+            const push = ((minR - dist) / dist) * alpha * 1.4;
             n.vx = (n.vx ?? 0) + dx * push;
             n.vy = (n.vy ?? 0) + dy * push;
           }
@@ -183,7 +183,7 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
           const dy = a.ly - b.ly;
           const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
           if (dist < minR) {
-            const push = ((minR - dist) / dist) * alpha * 0.5;
+            const push = ((minR - dist) / dist) * alpha * 1.2;
             const fx = dx * push * 0.5;
             const fy = dy * push * 0.5;
             a.s.vx = (a.s.vx ?? 0) + fx;
@@ -230,7 +230,6 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
       .alphaMin(0.02)
       .velocityDecay(0.35);
 
-    let refitted = false;
     sim.on("tick", () => {
       const current = getNodes();
       const byId = new Map(current.map((n) => [n.id, n]));
@@ -259,16 +258,6 @@ export function useForceLayout(contract: Contract | null, opts: Options) {
         });
       }
       setNodes(next);
-
-      // Once the sim has cooled enough that nodes have found their
-      // semantic columns, re-fit the viewport so the whole graph is
-      // visible (the initial fitView fires before positions stabilise).
-      if (!refitted && sim.alpha() < 0.1) {
-        refitted = true;
-        requestAnimationFrame(() =>
-          fitView({ padding: 0.25, duration: 400 }),
-        );
-      }
     });
 
     simRef.current = sim;

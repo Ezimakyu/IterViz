@@ -89,12 +89,12 @@ function GraphInner({ contract }: GraphProps) {
         onPaneClick={clearSelection}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.3 }}
+        defaultViewport={{ x: 200, y: 360, zoom: 1 }}
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
         maxZoom={1.8}
         nodesDraggable
+        panOnDrag
         zoomOnDoubleClick={false}
       >
         <Background

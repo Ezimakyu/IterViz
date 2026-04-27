@@ -10,7 +10,17 @@ const STATUS_COLORS: Record<SubgraphNode["status"], string> = {
   failed: "text-red-400",
 };
 
-export function InfoPanel() {
+export function useInfoPanelTitle(): string {
+  const activeParentNodeId = useSubgraphStore((s) => s.activeParentNodeId);
+  const subgraphs = useSubgraphStore((s) => s.subgraphs);
+  const activeSubgraph = activeParentNodeId
+    ? subgraphs[activeParentNodeId]
+    : null;
+  
+  return activeSubgraph ? "Implementation Tasks" : "Planning Summary";
+}
+
+export function InfoPanelContent() {
   const contract = useContractStore((s) => s.contract);
   const isLoading = useContractStore((s) => s.isLoading);
   const activeParentNodeId = useSubgraphStore((s) => s.activeParentNodeId);
@@ -21,13 +31,13 @@ export function InfoPanel() {
     : null;
 
   if (activeSubgraph) {
-    return <SubgraphInfoPanel subgraph={activeSubgraph} />;
+    return <SubgraphInfoContent subgraph={activeSubgraph} />;
   }
 
-  return <PlanningInfoPanel contract={contract} isLoading={isLoading} />;
+  return <PlanningInfoContent contract={contract} isLoading={isLoading} />;
 }
 
-function PlanningInfoPanel({
+function PlanningInfoContent({
   contract,
   isLoading,
 }: {
@@ -35,6 +45,8 @@ function PlanningInfoPanel({
   isLoading: boolean;
 }) {
   const subgraphs = useSubgraphStore((s) => s.subgraphs);
+  const isImplementing = useContractStore((s) => s.isImplementing);
+  const nodeProgressMessages = useContractStore((s) => s.nodeProgressMessages);
   
   const nodesByKind = useMemo(() => {
     if (!contract) return {};
@@ -53,38 +65,62 @@ function PlanningInfoPanel({
     return { ready, total };
   }, [contract, subgraphs]);
 
+  // Find the current activity (most recent progress message)
+  const currentActivity = useMemo(() => {
+    if (!contract || !isImplementing) return null;
+    
+    // Find node that is in_progress
+    const inProgressNode = contract.nodes.find((n) => n.status === "in_progress");
+    if (!inProgressNode) return null;
+    
+    const message = nodeProgressMessages.get(inProgressNode.id);
+    return {
+      nodeName: inProgressNode.name,
+      message: message || "Generating code...",
+    };
+  }, [contract, isImplementing, nodeProgressMessages]);
+
   if (isLoading) {
     return (
-      <aside className="flex h-full w-[360px] flex-col gap-3 border-l border-slate-800 bg-panel p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Planning Info
-        </h2>
+      <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center gap-2 text-sm text-muted">
           <LoadingSpinner />
           <span>Generating plan...</span>
         </div>
-      </aside>
+      </div>
     );
   }
 
   if (!contract) {
     return (
-      <aside className="flex h-full w-[360px] flex-col gap-3 border-l border-slate-800 bg-panel p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Planning Info
-        </h2>
+      <div className="flex flex-col gap-3 p-4">
         <p className="text-sm text-muted">
           Enter a prompt to generate a system architecture plan.
         </p>
-      </aside>
+      </div>
     );
   }
 
   return (
-    <aside className="flex h-full w-[400px] flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-panel p-4">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-        Planning Summary
-      </h2>
+    <div className="flex flex-col gap-4 p-4">
+      {currentActivity && (
+        <div className="rounded border border-sky-600 bg-sky-900/30 p-3 animate-pulse">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-sky-300 mb-2">
+            Current Activity
+          </h3>
+          <div className="flex items-center gap-2">
+            <LoadingSpinner />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-ink truncate">
+                {currentActivity.nodeName}
+              </p>
+              <p className="text-xs text-muted truncate">
+                {currentActivity.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {contract.meta?.stated_intent && (
         <div className="rounded border border-slate-700 bg-slate-900/60 p-3">
@@ -188,7 +224,7 @@ function PlanningInfoPanel({
             Decisions Made ({contract.decisions.length})
           </h3>
           <ol className="space-y-2">
-            {contract.decisions.slice(0, 5).map((decision, idx) => (
+            {contract.decisions.slice(0, 5).map((decision) => (
               <li key={decision.id} className="text-sm">
                 <p className="text-muted text-xs">{decision.question}</p>
                 <p className="text-ink">{decision.answer}</p>
@@ -202,11 +238,11 @@ function PlanningInfoPanel({
           </ol>
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 
-function SubgraphInfoPanel({
+function SubgraphInfoContent({
   subgraph,
 }: {
   subgraph: ReturnType<typeof useSubgraphStore.getState>["subgraphs"][string];
@@ -227,12 +263,9 @@ function SubgraphInfoPanel({
   const progressPct = Math.round(subgraph.progress * 100);
 
   return (
-    <aside className="flex h-full w-[400px] flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-panel p-4">
+    <div className="flex flex-col gap-4 p-4">
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Implementation Tasks
-        </h2>
-        <h3 className="text-lg font-semibold text-ink mt-1">
+        <h3 className="text-lg font-semibold text-ink">
           {subgraph.parent_node_name}
         </h3>
       </div>
@@ -275,7 +308,7 @@ function SubgraphInfoPanel({
           Estimated total: ~{subgraph.total_estimated_lines} lines of code
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 

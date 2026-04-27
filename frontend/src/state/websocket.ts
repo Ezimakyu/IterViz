@@ -50,7 +50,7 @@ function handleMessage(message: WSMessage): void {
       break;
     }
     case "node_progress": {
-      store.setNodeProgress(message.node_id, message.progress);
+      store.setNodeProgress(message.node_id, message.progress, message.message);
       break;
     }
     case "agent_connected": {

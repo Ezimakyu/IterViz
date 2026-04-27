@@ -1,12 +1,20 @@
 import { useContractStore } from "../state/contract";
 
 /**
- * Side panel listing connected agents and the nodes they're working on.
- *
- * Renders only when a Phase 2 implementation is in flight (or just
- * completed) so it stays out of the way during Phase 1.
+ * Hook to check if the agent panel should be visible.
  */
-export function AgentPanel() {
+export function useAgentPanelVisible(): boolean {
+  const isImplementing = useContractStore((s) => s.isImplementing);
+  const implementationComplete = useContractStore(
+    (s) => s.implementationComplete,
+  );
+  return isImplementing || implementationComplete;
+}
+
+/**
+ * Side panel content listing connected agents and the nodes they're working on.
+ */
+export function AgentPanelContent() {
   const isImplementing = useContractStore((s) => s.isImplementing);
   const implementationComplete = useContractStore(
     (s) => s.implementationComplete,
@@ -17,8 +25,6 @@ export function AgentPanel() {
   const connectedAgents = useContractStore((s) => s.connectedAgents);
   const nodeAgents = useContractStore((s) => s.nodeAgents);
   const contract = useContractStore((s) => s.contract);
-
-  if (!isImplementing && !implementationComplete) return null;
 
   const agentToNodes = new Map<string, string[]>();
   if (contract) {
@@ -33,14 +39,7 @@ export function AgentPanel() {
   const agents = Array.from(connectedAgents.values());
 
   return (
-    <aside
-      className="w-72 shrink-0 border-l border-slate-800 bg-panel p-4 text-sm overflow-auto"
-      data-testid="agent-panel"
-    >
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-        Phase 2 — Agents
-      </h2>
-
+    <div className="p-4 text-sm">
       {implementationComplete && (
         <div
           className={`mb-3 rounded border px-2 py-1 text-xs ${
@@ -101,6 +100,6 @@ export function AgentPanel() {
           })}
         </ul>
       )}
-    </aside>
+    </div>
   );
 }

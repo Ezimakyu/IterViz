@@ -57,6 +57,7 @@ interface ContractState {
   connectedAgents: Map<string, Agent>;
   nodeAgents: Map<string, { agentId: string; agentName: string }>;
   nodeProgress: Map<string, number>;
+  nodeProgressMessages: Map<string, string>;
   integrationMismatches: IntegrationMismatch[];
 
   // ---- actions ----
@@ -83,7 +84,7 @@ interface ContractState {
     status: NodeStatus,
     agent?: { id: string; name: string } | null,
   ) => void;
-  setNodeProgress: (nodeId: string, progress: number) => void;
+  setNodeProgress: (nodeId: string, progress: number, message?: string | null) => void;
   setAgentInfo: (agentId: string, agent: Agent) => void;
   addMismatch: (mismatch: IntegrationMismatch) => void;
   setIntegrationMismatches: (mismatches: IntegrationMismatch[]) => void;
@@ -128,6 +129,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
   connectedAgents: new Map(),
   nodeAgents: new Map(),
   nodeProgress: new Map(),
+  nodeProgressMessages: new Map(),
   integrationMismatches: [],
 
   setSession: (sessionId, contract) =>
@@ -151,6 +153,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
       connectedAgents: new Map(),
       nodeAgents: new Map(),
       nodeProgress: new Map(),
+      nodeProgressMessages: new Map(),
       integrationMismatches: [],
       ...initialSelection,
     }),
@@ -208,6 +211,7 @@ export const useContractStore = create<ContractState>((set, get) => ({
       connectedAgents: new Map(),
       nodeAgents: new Map(),
       nodeProgress: new Map(),
+      nodeProgressMessages: new Map(),
       integrationMismatches: [],
     }),
 
@@ -242,11 +246,15 @@ export const useContractStore = create<ContractState>((set, get) => ({
       };
     }),
 
-  setNodeProgress: (nodeId, progress) =>
+  setNodeProgress: (nodeId, progress, message) =>
     set((s) => {
       const np = new Map(s.nodeProgress);
       np.set(nodeId, progress);
-      return { nodeProgress: np };
+      const npm = new Map(s.nodeProgressMessages);
+      if (message) {
+        npm.set(nodeId, message);
+      }
+      return { nodeProgress: np, nodeProgressMessages: npm };
     }),
 
   setAgentInfo: (agentId, agent) =>

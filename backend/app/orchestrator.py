@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import assignments as assignments_svc
 from . import contract as contract_svc
+from . import subgraphs as subgraphs_store
 from . import ws
 from . import llm as llm_svc
 from .logger import get_logger
@@ -40,6 +42,7 @@ from .schemas import (
     Node,
     NodeStatus,
     Severity,
+    SubgraphNodeStatus,
 )
 
 log = get_logger(__name__)
@@ -47,7 +50,13 @@ log = get_logger(__name__)
 
 # Output directory for generated files. Tests can override via
 # ``set_generated_dir`` so we never pollute the repo working tree.
-_DEFAULT_GENERATED_DIR = Path(__file__).resolve().parent.parent / "generated"
+# Set ITERVIZ_GENERATED_DIR env var to customize.
+_env_generated_dir = os.environ.get("ITERVIZ_GENERATED_DIR")
+if _env_generated_dir:
+    _DEFAULT_GENERATED_DIR = Path(_env_generated_dir)
+else:
+    _DEFAULT_GENERATED_DIR = Path(__file__).resolve().parent.parent / "generated"
+
 _generated_dir_override: Optional[Path] = None
 
 
@@ -62,6 +71,64 @@ def set_generated_dir(path: Optional[Path]) -> None:
     """Override the generated-files output directory (mostly for tests)."""
     global _generated_dir_override
     _generated_dir_override = Path(path) if path is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Subgraph status sync
+# ---------------------------------------------------------------------------
+
+
+def _node_status_to_subgraph_status(node_status: NodeStatus) -> SubgraphNodeStatus:
+    """Map a top-level node status to the corresponding subgraph task status."""
+    if node_status == NodeStatus.IN_PROGRESS:
+        return SubgraphNodeStatus.IN_PROGRESS
+    if node_status == NodeStatus.IMPLEMENTED:
+        return SubgraphNodeStatus.COMPLETED
+    if node_status == NodeStatus.FAILED:
+        return SubgraphNodeStatus.FAILED
+    return SubgraphNodeStatus.PENDING
+
+
+async def _sync_subgraph_task_statuses(
+    session_id: str,
+    node_id: str,
+    node_status: NodeStatus,
+) -> None:
+    """Update all subgraph task statuses to reflect the parent node's status.
+    
+    When a top-level node transitions to in_progress/implemented/failed,
+    this function updates all its subgraph tasks to the corresponding status
+    and broadcasts the changes to connected clients.
+    """
+    subgraph = subgraphs_store.get_subgraph(session_id, node_id)
+    if not subgraph:
+        return
+
+    new_status = _node_status_to_subgraph_status(node_status)
+    
+    # Calculate progress based on status
+    if new_status == SubgraphNodeStatus.COMPLETED:
+        progress = 1.0
+    elif new_status == SubgraphNodeStatus.IN_PROGRESS:
+        progress = 0.5
+    else:
+        progress = 0.0
+
+    # Update each subgraph node and broadcast
+    for task in subgraph.nodes:
+        task.status = new_status
+        await ws.broadcast_subgraph_node_status_changed(
+            session_id=session_id,
+            parent_node_id=node_id,
+            subgraph_node_id=task.id,
+            status=new_status,
+            progress=progress,
+        )
+    
+    # Update the subgraph's aggregate status and progress
+    subgraph.status = new_status
+    subgraph.progress = progress
+    subgraphs_store.update_subgraph(subgraph)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +333,138 @@ class _SubagentOutput(BaseModel):
     notes: Optional[str] = None
 
 
+class _ConnectorOutput(BaseModel):
+    """Pydantic schema for the connector agent's output."""
+
+    model_config = ConfigDict(extra="allow")
+
+    main_py: str = Field(description="Content of the main.py entry point")
+    requirements_txt: str = Field(description="Content of requirements.txt")
+    notes: Optional[str] = None
+
+
+async def run_connector_pass(session_id: str) -> dict[str, str]:
+    """Generate main.py and requirements.txt to wire all components together.
+
+    Called after all nodes are implemented. Uses an LLM to generate the
+    glue code that imports all components and wires them according to
+    the contract's edges.
+
+    Returns a dict with 'main_py' and 'requirements_txt' file paths.
+    """
+    session = contract_svc.get_session(session_id)
+    contract = session.contract
+
+    # Build context about all implemented nodes
+    node_summaries = []
+    all_imports: set[str] = set()
+
+    for node in contract.nodes:
+        impl = node.implementation
+        if impl is None:
+            continue
+
+        actual = impl.actual_interface
+        node_info = {
+            "id": node.id,
+            "name": node.name,
+            "kind": node.kind,
+            "description": node.description,
+            "file_paths": impl.file_paths,
+            "exports": actual.exports if actual else [],
+            "imports": actual.imports if actual else [],
+            "public_functions": [f.model_dump() for f in (actual.public_functions or [])] if actual else [],
+        }
+        node_summaries.append(node_info)
+
+        if actual and actual.imports:
+            all_imports.update(actual.imports)
+
+    # Build edge summary
+    edge_summaries = [
+        {
+            "source": e.source,
+            "target": e.target,
+            "kind": e.kind.value if hasattr(e.kind, "value") else e.kind,
+            "payload_schema": e.payload_schema,
+        }
+        for e in contract.edges
+    ]
+
+    user_msg = (
+        "Wire all components together into a working application.\n\n"
+        f"System intent: {contract.meta.stated_intent}\n\n"
+        "Implemented nodes:\n"
+        f"{json.dumps(node_summaries, indent=2)}\n\n"
+        "Edges (data flow):\n"
+        f"{json.dumps(edge_summaries, indent=2)}\n\n"
+        "Generate main.py that imports all components and wires them together, "
+        "plus requirements.txt with all dependencies."
+    )
+
+    try:
+        system_prompt = llm_svc.load_prompt("connector")
+    except FileNotFoundError:
+        system_prompt = "You are a code connector agent that wires components together."
+
+    try:
+        result = await asyncio.to_thread(
+            llm_svc.call_structured,
+            response_model=_ConnectorOutput,
+            system=system_prompt,
+            user=user_msg,
+        )
+        output = result.model_dump()
+    except Exception as exc:
+        log.warning(
+            "orchestrator.connector_llm_failed",
+            extra={"session_id": session_id, "error": str(exc)},
+        )
+        # Fallback: generate a basic main.py
+        imports_code = "\n".join(
+            f"# from {n['id'].replace('-', '_')} import ..."
+            for n in node_summaries
+        )
+        output = {
+            "main_py": (
+                '"""Application entry point (auto-generated stub)."""\n\n'
+                f"{imports_code}\n\n"
+                "def main():\n"
+                '    """Wire and run all components."""\n'
+                "    print('Implementation complete. Manual wiring needed.')\n\n"
+                'if __name__ == "__main__":\n'
+                "    main()\n"
+            ),
+            "requirements_txt": "\n".join(sorted(all_imports)) + "\n",
+            "notes": "Fallback stub (LLM unavailable).",
+        }
+
+    # Write files to the session's output directory
+    output_dir = get_generated_dir() / session_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    main_path = output_dir / "main.py"
+    main_path.write_text(output["main_py"])
+
+    reqs_path = output_dir / "requirements.txt"
+    reqs_path.write_text(output["requirements_txt"])
+
+    log.info(
+        "orchestrator.connector_pass_complete",
+        extra={
+            "session_id": session_id,
+            "main_py_path": str(main_path),
+            "requirements_path": str(reqs_path),
+            "notes": output.get("notes"),
+        },
+    )
+
+    return {
+        "main_py": str(main_path),
+        "requirements_txt": str(reqs_path),
+    }
+
+
 async def run_implementation_internal(session_id: str) -> None:
     """Run the implementation phase using internal LLM subagents.
 
@@ -311,6 +510,7 @@ async def run_implementation_internal(session_id: str) -> None:
         await ws.broadcast_node_status_changed(
             session_id, node.id, NodeStatus.IN_PROGRESS
         )
+        await _sync_subgraph_task_statuses(session_id, node.id, NodeStatus.IN_PROGRESS)
 
         for n in contract.nodes:
             if n.id == node.id:
@@ -319,6 +519,15 @@ async def run_implementation_internal(session_id: str) -> None:
         contract = contract_svc.update_contract(session_id, contract).contract
 
         try:
+            # Broadcast progress: starting code generation
+            await ws.broadcast_node_progress(
+                session_id,
+                node.id,
+                internal_agent_id,
+                progress=0.2,
+                message=f"Generating code for {node.name}...",
+            )
+
             start_time = datetime.utcnow()
             impl = await _run_subagent(assignment)
             duration_ms = int(
@@ -337,6 +546,15 @@ async def run_implementation_internal(session_id: str) -> None:
                 file_path = output_dir / safe_name
                 file_path.write_text(content.get("content", ""))
                 file_paths.append(str(file_path))
+
+            # Broadcast progress: files written
+            await ws.broadcast_node_progress(
+                session_id,
+                node.id,
+                internal_agent_id,
+                progress=0.8,
+                message=f"Wrote {len(file_paths)} file(s) for {node.name}",
+            )
 
             actual_interface = ActualInterface(
                 exports=impl.get("exports", []),
@@ -369,6 +587,9 @@ async def run_implementation_internal(session_id: str) -> None:
             ).contract
 
             await ws.broadcast_node_status_changed(
+                session_id, node.id, NodeStatus.IMPLEMENTED
+            )
+            await _sync_subgraph_task_statuses(
                 session_id, node.id, NodeStatus.IMPLEMENTED
             )
 
@@ -408,9 +629,22 @@ async def run_implementation_internal(session_id: str) -> None:
             await ws.broadcast_node_status_changed(
                 session_id, node.id, NodeStatus.FAILED
             )
+            await _sync_subgraph_task_statuses(
+                session_id, node.id, NodeStatus.FAILED
+            )
             nodes_failed += 1
 
     mismatches = await run_integration_pass(session_id)
+
+    # Run connector pass to generate main.py and requirements.txt
+    connector_files = await run_connector_pass(session_id)
+    log.info(
+        "orchestrator.connector_files_generated",
+        extra={
+            "session_id": session_id,
+            "files": connector_files,
+        },
+    )
 
     contract.meta.status = ContractStatus.COMPLETE
     contract = contract_svc.update_contract(session_id, contract).contract

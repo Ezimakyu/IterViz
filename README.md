@@ -91,8 +91,10 @@ npm install
 ```bash
 conda activate iterviz
 cd backend
-DEBUG=1 uvicorn app.main:app --reload
+DEBUG=1 uvicorn app.main:app --reload --reload-dir app
 ```
+
+> **Note:** The `--reload-dir app` flag is important! It tells uvicorn to only watch the `app/` folder, ignoring the `generated/` folder where code is written during implementation.
 
 **Terminal 2 — Start frontend (port 5173):**
 ```bash

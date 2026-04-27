@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import contract as contract_svc
 from . import llm as llm_svc
+from . import orchestrator as orchestrator_svc
 from . import ws as ws_svc
 from .api import router as api_router
 from .logger import get_logger
@@ -27,7 +28,14 @@ DEFAULT_CORS_ORIGINS = [
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     contract_svc.init_db()
-    log.info("app.startup", extra={"db_path": str(contract_svc.get_db_path())})
+    generated_dir = orchestrator_svc.get_generated_dir()
+    log.info(
+        "app.startup",
+        extra={
+            "db_path": str(contract_svc.get_db_path()),
+            "generated_dir": str(generated_dir),
+        },
+    )
 
     # M3: prompt for the Anthropic key if running in an interactive TTY,
     # otherwise just log a warning so deployment / test harnesses keep
